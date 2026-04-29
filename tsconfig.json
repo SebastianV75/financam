@@ -1,0 +1,25 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "baseUrl": ".",
+    "types": [
+      "jest",
+      "nativewind/types"
+    ],
+    "paths": {
+      "@/*": [
+        "src/*"
+      ]
+    }
+  },
+  "include": [
+    "app",
+    "src",
+    "global.css",
+    "jest.setup.ts",
+    "__mocks__",
+    "*.config.ts",
+    "*.config.js"
+  ]
+}

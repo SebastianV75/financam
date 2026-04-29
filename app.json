@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "financam",
+    "slug": "financam",
+    "scheme": "financam",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "experiments": {
+      "typedRoutes": true
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.financam.app"
+    },
+    "android": {
+      "package": "com.financam.app"
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

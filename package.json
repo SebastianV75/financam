@@ -1,0 +1,49 @@
+{
+  "name": "financam",
+  "version": "0.1.0",
+  "private": true,
+  "description": "App mobile-first para finanzas personales enfocada en organización financiera quincenal.",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo start --ios",
+    "android": "expo start --android",
+    "web": "expo start --web",
+    "test": "jest --config jest.config.js --runInBand",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "date-fns": "^4.1.0",
+    "expo": "~54.0.0",
+    "expo-constants": "~18.0.0",
+    "expo-linking": "~8.0.0",
+    "expo-router": "~6.0.0",
+    "expo-sqlite": "~16.0.0",
+    "expo-status-bar": "~3.0.0",
+    "nativewind": "^4.2.0",
+    "react": "19.1.0",
+    "react-hook-form": "^7.65.0",
+    "react-native": "0.81.0",
+    "react-native-mmkv": "^3.3.0",
+    "react-native-safe-area-context": "5.6.0",
+    "react-native-screens": "~4.16.0",
+    "zod": "^4.1.12",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@testing-library/jest-native": "^5.4.3",
+    "@testing-library/react-native": "^13.3.3",
+    "@types/jest": "^30.0.0",
+    "@types/react": "~19.1.10",
+    "babel-preset-expo": "~54.0.0",
+    "eslint": "^8.57.1",
+    "eslint-config-expo": "~10.0.0",
+    "jest": "^30.2.0",
+    "jest-expo": "~54.0.0",
+    "react-test-renderer": "19.1.0",
+    "tailwindcss": "^3.4.17",
+    "ts-jest": "^29.4.9",
+    "typescript": "~5.9.3"
+  }
+}
