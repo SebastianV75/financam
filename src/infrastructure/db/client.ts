@@ -10,14 +10,22 @@ export async function openFinanceDatabase() {
 }
 
 export function toDatabaseClient(db: SQLiteDatabase): DatabaseClient {
+  const bindParams = (params?: unknown[]) => (params && params.length > 0 ? (params as []) : []);
+
   return {
     execAsync: (sql) => db.execAsync(sql),
-    getAllAsync: (sql, params) => {
-      if (!params || params.length === 0) {
-        return db.getAllAsync(sql);
+    getAllAsync: (sql, params) => db.getAllAsync(sql, ...bindParams(params)),
+    getFirstAsync: (sql, params) => db.getFirstAsync(sql, ...bindParams(params)),
+    withTransaction: async (operation) => {
+      await db.execAsync('BEGIN TRANSACTION;');
+      try {
+        const result = await operation();
+        await db.execAsync('COMMIT;');
+        return result;
+      } catch (error) {
+        await db.execAsync('ROLLBACK;');
+        throw error;
       }
-
-      return db.getAllAsync(sql, ...(params as []));
     },
   };
 }

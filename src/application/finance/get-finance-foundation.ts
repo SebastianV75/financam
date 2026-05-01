@@ -8,14 +8,18 @@ export async function getFinanceFoundation(
   repository: FinanceRepository,
   input: GetFinanceFoundationInput,
 ) {
-  const [plan, movements] = await Promise.all([
-    repository.listPlanByQuincena(input.quincenaId),
+  const [accounts, categories, movements, balances] = await Promise.all([
+    repository.listAccounts(),
+    repository.listCategories(),
     repository.listMovementsByQuincena(input.quincenaId),
+    repository.getAccountBalances(),
   ]);
 
   return {
     quincenaId: input.quincenaId,
-    plan,
+    accounts,
+    categories,
     movements,
+    balances,
   };
 }

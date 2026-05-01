@@ -18,10 +18,59 @@ export interface FinancialPlanRecord {
 
 export type MovementKind = 'expense' | 'income' | 'transfer';
 
+export type AccountType = 'cash' | 'debit' | 'savings' | 'credit_card';
+
+export interface Account {
+  id: string;
+  name: string;
+  type: AccountType;
+  isActive: boolean;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  icon?: string | null;
+  isActive: boolean;
+}
+
+export interface CreateAccountInput {
+  id: string;
+  name: string;
+  type: AccountType;
+}
+
+export interface CreateCategoryInput {
+  id: string;
+  name: string;
+  icon?: string | null;
+}
+
+export interface OperationalMovementDraft {
+  id: string;
+  quincenaId: QuincenaId;
+  occurredAt: string;
+  kind: MovementKind;
+  amount: Money;
+  fromAccountId: string | null;
+  toAccountId: string | null;
+  categoryId: string | null;
+  note?: string | null;
+}
+
 export interface OperationalMovementRecord {
   id: string;
   quincenaId: QuincenaId;
   occurredAt: string;
   kind: MovementKind;
   amount: Money;
+  fromAccountId: string | null;
+  toAccountId: string | null;
+  categoryId: string | null;
+  note?: string | null;
+}
+
+export interface AccountBalance {
+  accountId: string;
+  balance: Money;
 }

@@ -1,20 +1,26 @@
 import { getFinanceFoundation } from './get-finance-foundation';
 
 describe('getFinanceFoundation', () => {
-  it('combina plan y movimientos por quincena', async () => {
+  it('combina catálogos y movimientos operativos por quincena', async () => {
     const repository = {
-      listPlanByQuincena: jest.fn().mockResolvedValue([{ id: 'plan-1' }]),
+      listAccounts: jest.fn().mockResolvedValue([{ id: 'a-1' }]),
+      listCategories: jest.fn().mockResolvedValue([{ id: 'c-1' }]),
       listMovementsByQuincena: jest.fn().mockResolvedValue([{ id: 'movement-1' }]),
+      getAccountBalances: jest.fn().mockResolvedValue([{ accountId: 'a-1', balance: { amount: 100, currency: 'MXN' } }]),
     };
 
     const result = await getFinanceFoundation(repository as never, { quincenaId: 'q-1' });
 
-    expect(repository.listPlanByQuincena).toHaveBeenCalledWith('q-1');
+    expect(repository.listAccounts).toHaveBeenCalled();
+    expect(repository.listCategories).toHaveBeenCalled();
     expect(repository.listMovementsByQuincena).toHaveBeenCalledWith('q-1');
+    expect(repository.getAccountBalances).toHaveBeenCalled();
     expect(result).toEqual({
       quincenaId: 'q-1',
-      plan: [{ id: 'plan-1' }],
+      accounts: [{ id: 'a-1' }],
+      categories: [{ id: 'c-1' }],
       movements: [{ id: 'movement-1' }],
+      balances: [{ accountId: 'a-1', balance: { amount: 100, currency: 'MXN' } }],
     });
   });
 });

@@ -4,7 +4,7 @@ export default function MovimientosScreen() {
   return (
     <FinanceScreen
       title="Movimientos"
-      subtitle="Foundation del registro operativo. Aquí vivirá la captura de ingresos, gastos y transferencias."
+      subtitle="Registro operativo local-first: cuentas, categorías, ingresos, gastos y transferencias en SQLite."
       mode="movements"
     />
   );

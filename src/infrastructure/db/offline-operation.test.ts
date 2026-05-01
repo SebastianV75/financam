@@ -94,6 +94,83 @@ describe('Offline/Local-First Operation', () => {
       expect(sqlCall).toContain('FROM operational_movements');
     });
 
+    it('lista cuentas offline desde SQLite', async () => {
+      const mockDb = {
+        execAsync: jest.fn().mockResolvedValue(undefined),
+        getFirstAsync: jest.fn().mockResolvedValue({ user_version: 2 }),
+        getAllAsync: jest.fn().mockResolvedValue([
+          {
+            id: 'acc-1',
+            name: 'Efectivo',
+            type: 'cash',
+            is_active: 1,
+          },
+        ]),
+      };
+      MockedOpenDatabase.mockResolvedValue(mockDb as never);
+
+      const { openFinanceDatabase, toDatabaseClient } = await import('@/infrastructure/db/client');
+      const db = await openFinanceDatabase();
+      const client = toDatabaseClient(db);
+      const repository = new SQLiteFinanceRepository(client);
+
+      const accounts = await repository.listAccounts();
+
+      expect(accounts).toEqual([{ id: 'acc-1', name: 'Efectivo', type: 'cash', isActive: true }]);
+      expect(MockedOpenDatabase).toHaveBeenCalledWith('financam.db');
+    });
+
+    it('permite alta offline de ingreso y gasto válidos', async () => {
+      const mockDb = {
+        execAsync: jest.fn().mockResolvedValue(undefined),
+        getFirstAsync: jest.fn().mockResolvedValue({ user_version: 2 }),
+        getAllAsync: jest.fn().mockResolvedValue([]),
+      };
+      MockedOpenDatabase.mockResolvedValue(mockDb as never);
+
+      const { openFinanceDatabase, toDatabaseClient } = await import('@/infrastructure/db/client');
+      const db = await openFinanceDatabase();
+      const client = toDatabaseClient(db);
+      const repository = new SQLiteFinanceRepository(client);
+
+      await repository.createOperationalMovement({
+        id: 'income-1',
+        quincenaId: 'q-2024-01',
+        occurredAt: '2024-01-01T10:00:00Z',
+        kind: 'income',
+        amount: { amount: 12000, currency: 'MXN' },
+        fromAccountId: null,
+        toAccountId: 'acc-1',
+        categoryId: 'cat-1',
+      });
+
+      await repository.createOperationalMovement({
+        id: 'expense-1',
+        quincenaId: 'q-2024-01',
+        occurredAt: '2024-01-01T12:00:00Z',
+        kind: 'expense',
+        amount: { amount: 3000, currency: 'MXN' },
+        fromAccountId: 'acc-1',
+        toAccountId: null,
+        categoryId: 'cat-2',
+      });
+
+      const sqlCalls = mockDb.execAsync.mock.calls.map((call) => String(call[0]));
+      expect(sqlCalls.some((sql) => sql.includes('BEGIN TRANSACTION;'))).toBe(true);
+      expect(sqlCalls.some((sql) => sql.includes('COMMIT;'))).toBe(true);
+      expect(
+        sqlCalls.some(
+          (sql) =>
+            sql.includes('INSERT INTO operational_movements') &&
+            sql.includes("'income'") &&
+            sql.includes("'expense'"),
+        ),
+      ).toBe(false);
+      expect(
+        sqlCalls.filter((sql) => sql.includes('INSERT INTO operational_movements')).length,
+      ).toBeGreaterThanOrEqual(2);
+    });
+
     it('arquitectura no asume sincronización remota en foundation', async () => {
       // GIVEN: Solo tenemos métodos de persistencia local
       const mockDb = {
