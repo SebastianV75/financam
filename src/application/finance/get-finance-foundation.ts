@@ -1,22 +1,22 @@
-import type { FinanceRepository, QuincenaId } from '@/domain/finance';
+import type { FinanceRepository } from '@/domain/finance';
 
-interface GetFinanceFoundationInput {
-  quincenaId: QuincenaId;
-}
+import { ensureCurrentQuincena } from './ensure-current-quincena';
 
 export async function getFinanceFoundation(
   repository: FinanceRepository,
-  input: GetFinanceFoundationInput,
+  input?: { date?: Date },
 ) {
+  const quincena = await ensureCurrentQuincena(repository, input?.date ?? new Date());
+
   const [accounts, categories, movements, balances] = await Promise.all([
     repository.listAccounts(),
     repository.listCategories(),
-    repository.listMovementsByQuincena(input.quincenaId),
+    repository.listMovementsByQuincena(quincena.id),
     repository.getAccountBalances(),
   ]);
 
   return {
-    quincenaId: input.quincenaId,
+    quincena,
     accounts,
     categories,
     movements,

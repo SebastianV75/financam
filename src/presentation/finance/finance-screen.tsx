@@ -8,11 +8,9 @@ interface FinanceScreenProps {
   mode: 'plan' | 'movements';
 }
 
-const FOUNDATION_QUINCENA_ID = 'foundation-current';
-
 export function FinanceScreen({ mode, subtitle, title }: FinanceScreenProps) {
-  const { summary, accounts, categories, balances, movements, createQuickMovement, error, state } =
-    useFinanceFoundation(FOUNDATION_QUINCENA_ID);
+  const { summary, accounts, categories, balances, movements, activeQuincena, createQuickMovement, error, state } =
+    useFinanceFoundation();
 
   return (
     <View className="flex-1 bg-background px-5 py-6">
@@ -22,6 +20,12 @@ export function FinanceScreen({ mode, subtitle, title }: FinanceScreenProps) {
       <View className="mt-6 rounded-2xl border border-border bg-surface p-5">
         <Text className="text-sm font-medium uppercase tracking-wide text-muted">Estado del foundation</Text>
         <Text className="mt-3 text-base text-text">Modo: {mode === 'plan' ? 'Planeación' : 'Operación'}</Text>
+        <Text className="mt-2 text-base text-text">
+          Quincena activa: {activeQuincena?.label ?? 'resolviendo...'}
+        </Text>
+        <Text className="mt-2 text-base text-text">
+          Rango: {activeQuincena ? `${activeQuincena.startsAt} → ${activeQuincena.endsAt}` : '-'}
+        </Text>
         <Text className="mt-2 text-base text-text">Estado de lectura: {state}</Text>
         <Text className="mt-2 text-base text-text">Cuentas: {summary.accounts}</Text>
         <Text className="mt-2 text-base text-text">Categorías: {summary.categories}</Text>

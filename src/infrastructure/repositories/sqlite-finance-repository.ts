@@ -6,10 +6,18 @@ import type {
   CreateCategoryInput,
   FinanceRepository,
   FinancialPlanRecord,
+  OperationalSnapshot,
   OperationalMovementDraft,
   OperationalMovementRecord,
+  Quincena,
   QuincenaId,
 } from '@/domain/finance';
+import {
+  buildQuincenaId,
+  isDateWithinQuincena,
+  normalizeToLocalDate,
+  resolveQuincenaRange,
+} from '@/domain/finance/rules/pay-cycle';
 import { DEFAULT_CURRENCY } from '@/shared/constants/app';
 
 import type { DatabaseClient } from '@/infrastructure/db/types';
@@ -20,6 +28,13 @@ interface FinancialPlanRow {
   category_id: string;
   planned_amount: number;
   currency: string | null;
+}
+
+interface QuincenaRow {
+  id: string;
+  starts_at: string;
+  ends_at: string;
+  label: string;
 }
 
 interface OperationalMovementRow {
@@ -56,6 +71,74 @@ interface AccountBalanceRow {
 
 export class SQLiteFinanceRepository implements FinanceRepository {
   constructor(private readonly db: DatabaseClient) {}
+
+  async getQuincenaById(id: QuincenaId): Promise<Quincena | null> {
+    const row = await this.db.getFirstAsync<QuincenaRow>(
+      `SELECT id, starts_at, ends_at, label FROM quincenas WHERE id = ? LIMIT 1;`,
+      [id],
+    );
+    if (!row || !row.starts_at || !row.ends_at) return null;
+    return this.mapQuincena(row);
+  }
+
+  async listQuincenasByMonth(month: `${number}-${number}`): Promise<Quincena[]> {
+    const monthStart = `${month}-01`;
+    const [year, monthRaw] = month.split('-').map(Number);
+    const monthEndDate = new Date(year, monthRaw, 0);
+    const monthEnd = `${month}-${String(monthEndDate.getDate()).padStart(2, '0')}`;
+
+    const rows = await this.db.getAllAsync<QuincenaRow>(
+      `SELECT id, starts_at, ends_at, label
+       FROM quincenas
+       WHERE starts_at <= ? AND ends_at >= ?
+       ORDER BY starts_at ASC;`,
+      [monthEnd, monthStart],
+    );
+
+    return rows.map((row) => this.mapQuincena(row));
+  }
+
+  async ensureQuincenaForDate(date: string | Date): Promise<Quincena> {
+    const range = resolveQuincenaRange(date);
+    const id = buildQuincenaId(range);
+    const existing = await this.getQuincenaById(id);
+    if (existing) return existing;
+
+    return this.db.withTransaction(async () => {
+      const inTxExisting = await this.db.getFirstAsync<QuincenaRow>(
+        `SELECT id, starts_at, ends_at, label FROM quincenas WHERE id = ? LIMIT 1;`,
+        [id],
+      );
+      if (inTxExisting) return this.mapQuincena(inTxExisting);
+
+      const overlap = await this.db.getFirstAsync<{ id: string }>(
+        `SELECT id
+         FROM quincenas
+         WHERE starts_at <= ?
+           AND ends_at >= ?
+         LIMIT 1;`,
+        [range.endsAt, range.startsAt],
+      );
+      if (overlap) {
+        throw new Error('Quincena inválida: rango solapado con periodo existente.');
+      }
+
+      const label = `${range.startsAt} al ${range.endsAt}`;
+      await this.db.execAsync(
+        `INSERT INTO quincenas (id, starts_at, ends_at, label) VALUES ('${id}', '${range.startsAt}', '${range.endsAt}', '${label}');`,
+      );
+
+      return { id, startsAt: range.startsAt, endsAt: range.endsAt, label };
+    });
+  }
+
+  async getOperationalSnapshotByQuincena(id: QuincenaId): Promise<OperationalSnapshot> {
+    const quincena = await this.getQuincenaById(id);
+    if (!quincena) throw new Error('Quincena no encontrada para snapshot operativo.');
+
+    const movements = await this.listMovementsByQuincena(id);
+    return { quincena, movements };
+  }
 
   async listAccounts(): Promise<Account[]> {
     const rows = await this.db.getAllAsync<AccountRow>(
@@ -96,6 +179,13 @@ export class SQLiteFinanceRepository implements FinanceRepository {
 
   async createOperationalMovement(input: OperationalMovementDraft): Promise<OperationalMovementRecord> {
     return this.db.withTransaction(async () => {
+      const quincena = await this.getQuincenaById(input.quincenaId as QuincenaId);
+      if (!quincena) throw new Error('Movimiento inválido: quincena no existe.');
+      if (!isDateWithinQuincena(input.occurredAt, quincena)) {
+        throw new Error('Movimiento inválido: occurredAt fuera del rango de la quincena.');
+      }
+
+      const occurredOn = normalizeToLocalDate(input.occurredAt);
       const fromValue = input.fromAccountId ? `'${input.fromAccountId}'` : 'NULL';
       const toValue = input.toAccountId ? `'${input.toAccountId}'` : 'NULL';
       const categoryValue = input.categoryId ? `'${input.categoryId}'` : 'NULL';
@@ -106,7 +196,7 @@ export class SQLiteFinanceRepository implements FinanceRepository {
         ) VALUES (
           '${input.id}',
           '${input.quincenaId}',
-          '${input.occurredAt}',
+          '${occurredOn}',
           '${input.kind}',
           ${input.amount.amount},
           '${input.amount.currency}',
@@ -120,7 +210,7 @@ export class SQLiteFinanceRepository implements FinanceRepository {
       return {
         id: input.id,
         quincenaId: input.quincenaId,
-        occurredAt: input.occurredAt,
+        occurredAt: occurredOn,
         kind: input.kind,
         amount: input.amount,
         fromAccountId: input.fromAccountId,
@@ -200,5 +290,14 @@ export class SQLiteFinanceRepository implements FinanceRepository {
       accountId: row.account_id,
       balance: { amount: row.balance, currency: DEFAULT_CURRENCY },
     }));
+  }
+
+  private mapQuincena(row: QuincenaRow): Quincena {
+    return {
+      id: row.id as QuincenaId,
+      startsAt: row.starts_at as Quincena['startsAt'],
+      endsAt: row.ends_at as Quincena['endsAt'],
+      label: row.label,
+    };
   }
 }

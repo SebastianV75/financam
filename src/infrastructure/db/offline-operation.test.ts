@@ -123,7 +123,18 @@ describe('Offline/Local-First Operation', () => {
     it('permite alta offline de ingreso y gasto válidos', async () => {
       const mockDb = {
         execAsync: jest.fn().mockResolvedValue(undefined),
-        getFirstAsync: jest.fn().mockResolvedValue({ user_version: 2 }),
+        getFirstAsync: jest.fn().mockImplementation(async (sql: string) => {
+          if (sql.includes('PRAGMA user_version')) return { user_version: 2 };
+          if (sql.includes('FROM quincenas')) {
+            return {
+              id: 'q-2024-01',
+              starts_at: '2024-01-01',
+              ends_at: '2024-01-15',
+              label: '2024-01-01 al 2024-01-15',
+            };
+          }
+          return null;
+        }),
         getAllAsync: jest.fn().mockResolvedValue([]),
       };
       MockedOpenDatabase.mockResolvedValue(mockDb as never);

@@ -97,6 +97,16 @@ export const FOUNDATION_MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_operational_movements_category ON operational_movements(category_id);
     `,
   },
+  {
+    version: 3,
+    name: '0003_pay_cycle_core_indexes',
+    sql: `
+      CREATE INDEX IF NOT EXISTS idx_quincenas_starts_at ON quincenas(starts_at);
+      CREATE INDEX IF NOT EXISTS idx_quincenas_ends_at ON quincenas(ends_at);
+      CREATE INDEX IF NOT EXISTS idx_operational_movements_quincena_occurred_at
+        ON operational_movements(quincena_id, occurred_at DESC);
+    `,
+  },
 ];
 
 export async function migrateDatabase(

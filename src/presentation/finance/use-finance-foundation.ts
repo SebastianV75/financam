@@ -12,7 +12,7 @@ interface CreateMovementInput {
   amount: number;
 }
 
-export function useFinanceFoundation(quincenaId: string) {
+export function useFinanceFoundation() {
   const { db } = useDatabaseContext();
   const [state, setState] = useState<ViewState>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +23,9 @@ export function useFinanceFoundation(quincenaId: string) {
   const [movements, setMovements] = useState<
     Awaited<ReturnType<SQLiteFinanceRepository['listMovementsByQuincena']>>
   >([]);
+  const [activeQuincena, setActiveQuincena] = useState<{ id: string; label: string; startsAt: string; endsAt: string } | null>(
+    null,
+  );
 
   const repository = useMemo(() => {
     if (!db) return null;
@@ -39,7 +42,7 @@ export function useFinanceFoundation(quincenaId: string) {
     async function load() {
       try {
         setState('loading');
-        const result = await getFinanceFoundation(activeRepository, { quincenaId });
+        const result = await getFinanceFoundation(activeRepository);
 
         if (!isMounted) return;
 
@@ -53,6 +56,7 @@ export function useFinanceFoundation(quincenaId: string) {
         setCategories(result.categories);
         setBalances(result.balances);
         setMovements(result.movements);
+        setActiveQuincena(result.quincena);
         setError(null);
         setState('ready');
       } catch (loadError) {
@@ -68,10 +72,11 @@ export function useFinanceFoundation(quincenaId: string) {
     return () => {
       isMounted = false;
     };
-  }, [quincenaId, repository]);
+  }, [repository]);
 
   async function createQuickMovement(input: CreateMovementInput) {
     if (!repository) throw new Error('Repositorio no inicializado.');
+    if (!activeQuincena) throw new Error('Quincena activa no disponible.');
     if (accounts.length === 0) throw new Error('Se requiere al menos una cuenta.');
     if ((input.kind === 'income' || input.kind === 'expense') && categories.length === 0) {
       throw new Error('Se requiere al menos una categoría para ingreso o gasto.');
@@ -82,7 +87,7 @@ export function useFinanceFoundation(quincenaId: string) {
 
     await createOperationalMovement(repository, {
       id: `${input.kind}-${Date.now()}`,
-      quincenaId,
+      quincenaId: activeQuincena.id,
       occurredAt: new Date().toISOString(),
       kind: input.kind,
       amount: { amount: input.amount, currency: 'MXN' },
@@ -97,7 +102,7 @@ export function useFinanceFoundation(quincenaId: string) {
       note: 'captura rápida UI',
     });
 
-    const refreshed = await getFinanceFoundation(repository, { quincenaId });
+    const refreshed = await getFinanceFoundation(repository);
     setSummary({
       accounts: refreshed.accounts.length,
       categories: refreshed.categories.length,
@@ -108,7 +113,12 @@ export function useFinanceFoundation(quincenaId: string) {
     setCategories(refreshed.categories);
     setBalances(refreshed.balances);
     setMovements(refreshed.movements);
+    setActiveQuincena(refreshed.quincena);
   }
 
-  return { summary, accounts, categories, balances, movements, createQuickMovement, error, state };
+  if (!activeQuincena && state === 'ready') {
+    throw new Error('No se pudo resolver quincena activa.');
+  }
+
+  return { summary, accounts, categories, balances, movements, activeQuincena, createQuickMovement, error, state };
 }

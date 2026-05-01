@@ -1,5 +1,6 @@
 import { DEFAULT_CURRENCY } from '@/shared/constants/app';
 
+export type LocalDateISO = string;
 export type QuincenaId = string;
 
 export type CurrencyCode = typeof DEFAULT_CURRENCY;
@@ -14,6 +15,16 @@ export interface FinancialPlanRecord {
   quincenaId: QuincenaId;
   categoryId: string;
   planned: Money;
+}
+
+export interface QuincenaRange {
+  startsAt: LocalDateISO;
+  endsAt: LocalDateISO;
+}
+
+export interface Quincena extends QuincenaRange {
+  id: QuincenaId;
+  label: string;
 }
 
 export type MovementKind = 'expense' | 'income' | 'transfer';
@@ -73,4 +84,9 @@ export interface OperationalMovementRecord {
 export interface AccountBalance {
   accountId: string;
   balance: Money;
+}
+
+export interface OperationalSnapshot {
+  quincena: Quincena;
+  movements: OperationalMovementRecord[];
 }

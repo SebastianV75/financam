@@ -2,6 +2,12 @@ import { createOperationalMovement } from './create-operational-movement';
 
 describe('createOperationalMovement', () => {
   const repository = {
+    getQuincenaById: jest.fn().mockResolvedValue({
+      id: 'q1',
+      startsAt: '2026-01-01',
+      endsAt: '2026-01-15',
+      label: 'Q1',
+    }),
     createOperationalMovement: jest.fn().mockImplementation(async (input) => input),
   };
 
@@ -82,5 +88,17 @@ describe('createOperationalMovement', () => {
 
     expect(result.kind).toBe('transfer');
     expect(repository.createOperationalMovement).toHaveBeenCalled();
+  });
+
+  it('rechaza cuando occurredAt cae fuera de la quincena', async () => {
+    await expect(
+      createOperationalMovement(repository as never, {
+        ...base,
+        kind: 'expense',
+        occurredAt: '2026-01-20T00:00:00Z',
+        fromAccountId: 'a1',
+        categoryId: 'cat-1',
+      }),
+    ).rejects.toThrow('fuera de la quincena');
   });
 });

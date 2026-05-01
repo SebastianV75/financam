@@ -1,2 +1,2 @@
 export const DATABASE_NAME = 'financam.db';
-export const DATABASE_VERSION = 2;
+export const DATABASE_VERSION = 3;
