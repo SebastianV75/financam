@@ -20,6 +20,9 @@
     "jest.setup.ts",
     "__mocks__",
     "*.config.ts",
-    "*.config.js"
+    "*.config.js",
+    "nativewind-env.d.ts",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
   ]
 }
