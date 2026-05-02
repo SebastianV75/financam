@@ -2,6 +2,7 @@
   "expo": {
     "name": "financam",
     "slug": "financam",
+    "icon": "./assets/icon.png",
     "scheme": "financam",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -11,7 +12,8 @@
     },
     "plugins": [
       "expo-router",
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-dev-client"
     ],
     "ios": {
       "supportsTablet": false,

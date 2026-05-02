@@ -1,22 +1,7 @@
 import { create } from 'zustand';
-import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
-import { assertPersistenceAllowed } from '@/infrastructure/persistence/guardrails';
-import { preferencesStorage } from '@/infrastructure/persistence/mmkv-storage';
-
-const mmkvJsonStorage: StateStorage = {
-  getItem: (name) => {
-    const value = preferencesStorage.getString(name);
-    return value ?? null;
-  },
-  setItem: (name, value) => {
-    assertPersistenceAllowed('mmkv', 'preferences');
-    preferencesStorage.set(name, value);
-  },
-  removeItem: (name) => {
-    preferencesStorage.delete(name);
-  },
-};
+import { createPreferencesStateStorage } from '@/infrastructure/persistence/preferences-storage';
 
 interface PreferencesStore {
   currency: 'MXN';
@@ -33,7 +18,7 @@ export const usePreferencesStore = create<PreferencesStore>()(
     }),
     {
       name: 'financam-preferences',
-      storage: createJSONStorage(() => mmkvJsonStorage),
+      storage: createJSONStorage(createPreferencesStateStorage),
       partialize: (state) => ({
         currency: state.currency,
         hasSeenOnboarding: state.hasSeenOnboarding,

@@ -21,6 +21,14 @@ jest.mock('react-native-safe-area-context', () => ({
   SafeAreaProvider: 'SafeAreaProvider',
 }));
 
+jest.mock('react-native-mmkv', () => ({
+  MMKV: jest.fn().mockImplementation(() => ({
+    getString: jest.fn(),
+    set: jest.fn(),
+    delete: jest.fn(),
+  })),
+}));
+
 import * as ExpoSqlite from 'expo-sqlite';
 import { bootstrapDatabase } from '@/infrastructure/db/bootstrap';
 
@@ -146,6 +154,12 @@ describe('Shell Foundation Smoke Tests', () => {
       // THEN: Exports esperados existen
       expect(ProviderModule.DatabaseProvider).toBeDefined();
       expect(ProviderModule.useDatabaseContext).toBeDefined();
+    });
+
+    it('store de preferencias se integra sin romper el boot técnico', async () => {
+      const PreferencesStoreModule = await import('@/store/preferences-store');
+
+      expect(PreferencesStoreModule.usePreferencesStore).toBeDefined();
     });
   });
 });
