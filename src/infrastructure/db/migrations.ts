@@ -107,6 +107,55 @@ export const FOUNDATION_MIGRATIONS: Migration[] = [
         ON operational_movements(quincena_id, occurred_at DESC);
     `,
   },
+  {
+    version: 4,
+    name: '0004_payroll_distribution_core',
+    sql: `
+      CREATE TABLE IF NOT EXISTS payroll_distributions (
+        id TEXT PRIMARY KEY NOT NULL,
+        quincena_id TEXT NOT NULL UNIQUE,
+        total_amount INTEGER NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'MXN',
+        status TEXT NOT NULL CHECK(status IN ('draft', 'applied')) DEFAULT 'draft',
+        income_movement_id TEXT,
+        applied_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (quincena_id) REFERENCES quincenas (id),
+        FOREIGN KEY (income_movement_id) REFERENCES operational_movements (id)
+      );
+
+      CREATE TABLE IF NOT EXISTS payroll_distribution_entries (
+        id TEXT PRIMARY KEY NOT NULL,
+        distribution_id TEXT NOT NULL,
+        target_type TEXT NOT NULL CHECK(target_type IN ('account', 'category')),
+        target_id TEXT NOT NULL,
+        allocated_amount INTEGER NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'MXN',
+        sort_order INTEGER NOT NULL,
+        FOREIGN KEY (distribution_id) REFERENCES payroll_distributions (id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS payroll_distribution_applications (
+        id TEXT PRIMARY KEY NOT NULL,
+        distribution_id TEXT NOT NULL UNIQUE,
+        income_movement_id TEXT,
+        applied_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (distribution_id) REFERENCES payroll_distributions (id) ON DELETE CASCADE,
+        FOREIGN KEY (income_movement_id) REFERENCES operational_movements (id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_payroll_distributions_quincena
+        ON payroll_distributions(quincena_id);
+      CREATE INDEX IF NOT EXISTS idx_payroll_distribution_entries_distribution
+        ON payroll_distribution_entries(distribution_id, sort_order ASC);
+      CREATE INDEX IF NOT EXISTS idx_payroll_distribution_applications_distribution
+        ON payroll_distribution_applications(distribution_id);
+      CREATE INDEX IF NOT EXISTS idx_payroll_distribution_applications_income
+        ON payroll_distribution_applications(income_movement_id);
+    `,
+  },
 ];
 
 export async function migrateDatabase(

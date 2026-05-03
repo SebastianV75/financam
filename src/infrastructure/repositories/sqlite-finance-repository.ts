@@ -9,8 +9,14 @@ import type {
   OperationalSnapshot,
   OperationalMovementDraft,
   OperationalMovementRecord,
+  PayrollDistribution,
+  PayrollDistributionApplication,
+  PayrollDistributionEntry,
   Quincena,
   QuincenaId,
+  SavePayrollDistributionDraftInput,
+  ApplyPayrollDistributionInput,
+  ApplyPayrollDistributionResult,
 } from '@/domain/finance';
 import {
   buildQuincenaId,
@@ -67,6 +73,33 @@ interface CategoryRow {
 interface AccountBalanceRow {
   account_id: string;
   balance: number;
+}
+
+interface PayrollDistributionRow {
+  id: string;
+  quincena_id: string;
+  total_amount: number;
+  currency: string | null;
+  status: 'draft' | 'applied';
+  income_movement_id: string | null;
+  applied_at: string | null;
+}
+
+interface PayrollDistributionEntryRow {
+  id: string;
+  distribution_id: string;
+  target_type: 'account' | 'category';
+  target_id: string;
+  allocated_amount: number;
+  currency: string | null;
+  sort_order: number;
+}
+
+interface PayrollDistributionApplicationRow {
+  id: string;
+  distribution_id: string;
+  income_movement_id: string | null;
+  applied_at: string;
 }
 
 export class SQLiteFinanceRepository implements FinanceRepository {
@@ -292,12 +325,283 @@ export class SQLiteFinanceRepository implements FinanceRepository {
     }));
   }
 
+  async savePayrollDistributionDraft(input: SavePayrollDistributionDraftInput): Promise<PayrollDistribution> {
+    return this.db.withTransaction(async () => {
+      const existing = await this.db.getFirstAsync<PayrollDistributionRow>(
+        `SELECT id, quincena_id, total_amount, currency, status, income_movement_id, applied_at
+         FROM payroll_distributions
+         WHERE quincena_id = ?
+         LIMIT 1;`,
+        [input.quincenaId],
+      );
+
+      if (existing && existing.status === 'applied') {
+        throw new Error('No se puede editar una distribución ya aplicada.');
+      }
+
+      const distributionId = existing?.id ?? input.id;
+      const escapedDistributionId = distributionId.replace(/'/g, "''");
+
+      await this.db.execAsync(`
+        INSERT INTO payroll_distributions (id, quincena_id, total_amount, currency, status, income_movement_id, applied_at, updated_at)
+        VALUES ('${escapedDistributionId}', '${input.quincenaId}', ${input.total.amount}, '${input.total.currency}', 'draft', NULL, NULL, CURRENT_TIMESTAMP)
+        ON CONFLICT(quincena_id) DO UPDATE SET
+          total_amount = excluded.total_amount,
+          currency = excluded.currency,
+          updated_at = CURRENT_TIMESTAMP;
+      `);
+
+      await this.db.execAsync(`DELETE FROM payroll_distribution_entries WHERE distribution_id = '${escapedDistributionId}';`);
+
+      for (const entry of input.entries) {
+        await this.db.execAsync(`
+          INSERT INTO payroll_distribution_entries (id, distribution_id, target_type, target_id, allocated_amount, currency, sort_order)
+          VALUES (
+            '${entry.id.replace(/'/g, "''")}',
+            '${escapedDistributionId}',
+            '${entry.targetType}',
+            '${entry.targetId.replace(/'/g, "''")}',
+            ${entry.allocated.amount},
+            '${entry.allocated.currency}',
+            ${entry.sortOrder}
+          );
+        `);
+      }
+
+      const sumRow = await this.db.getFirstAsync<{ allocated_total: number | null }>(
+        `SELECT COALESCE(SUM(allocated_amount), 0) AS allocated_total
+         FROM payroll_distribution_entries
+         WHERE distribution_id = ?;`,
+        [distributionId],
+      );
+
+      const allocatedTotal = sumRow?.allocated_total ?? 0;
+      if (allocatedTotal > input.total.amount) {
+        throw new Error('La suma de distribución excede el total de nómina.');
+      }
+
+      const saved = await this.getPayrollDistributionById(distributionId);
+      if (!saved) throw new Error('No se pudo guardar la distribución de nómina.');
+      return saved;
+    });
+  }
+
+  async getPayrollDistributionByQuincena(quincenaId: QuincenaId): Promise<PayrollDistribution | null> {
+    const row = await this.db.getFirstAsync<PayrollDistributionRow>(
+      `SELECT id, quincena_id, total_amount, currency, status, income_movement_id, applied_at
+       FROM payroll_distributions
+       WHERE quincena_id = ?
+       LIMIT 1;`,
+      [quincenaId],
+    );
+    if (!row) return null;
+    return this.mapPayrollDistribution(row);
+  }
+
+  async getPayrollDistributionById(distributionId: string): Promise<PayrollDistribution | null> {
+    const row = await this.db.getFirstAsync<PayrollDistributionRow>(
+      `SELECT id, quincena_id, total_amount, currency, status, income_movement_id, applied_at
+       FROM payroll_distributions
+       WHERE id = ?
+       LIMIT 1;`,
+      [distributionId],
+    );
+    if (!row) return null;
+    return this.mapPayrollDistribution(row);
+  }
+
+  async listAppliedMovementsByDistribution(distributionId: string): Promise<OperationalMovementRecord[]> {
+    const distribution = await this.getPayrollDistributionById(distributionId);
+    if (!distribution) return [];
+
+    const appliedMovementIds = new Set(distribution.entries.map((entry) => `${distribution.id}-${entry.id}`));
+    if (appliedMovementIds.size === 0) return [];
+
+    const movements = await this.listMovementsByQuincena(distribution.quincenaId);
+    return movements.filter((movement) => appliedMovementIds.has(movement.id));
+  }
+
+  async applyPayrollDistribution(input: ApplyPayrollDistributionInput): Promise<ApplyPayrollDistributionResult> {
+    return this.db.withTransaction(async () => {
+      const distribution = await this.getPayrollDistributionById(input.distributionId);
+      if (!distribution) throw new Error('Distribución de nómina no encontrada.');
+
+      const existingApplication = await this.db.getFirstAsync<PayrollDistributionApplicationRow>(
+        `SELECT id, distribution_id, income_movement_id, applied_at
+         FROM payroll_distribution_applications
+         WHERE distribution_id = ?
+         LIMIT 1;`,
+        [input.distributionId],
+      );
+
+      if (existingApplication) {
+        const appliedDistribution = await this.getPayrollDistributionById(input.distributionId);
+        if (!appliedDistribution) throw new Error('Distribución aplicada inconsistente.');
+        return {
+          distribution: appliedDistribution,
+          application: this.mapPayrollDistributionApplication(existingApplication),
+          createdMovementIds: [],
+          alreadyApplied: true,
+        };
+      }
+
+      if (distribution.status === 'applied') {
+        throw new Error('La distribución ya está aplicada sin registro de aplicación.');
+      }
+
+      const incomeMovement = await this.db.getFirstAsync<OperationalMovementRow>(
+        `SELECT id, quincena_id, occurred_at, kind, amount, currency, from_account_id, to_account_id, category_id, note
+         FROM operational_movements
+         WHERE id = ?
+         LIMIT 1;`,
+        [input.incomeMovementId],
+      );
+      if (!incomeMovement || incomeMovement.kind !== 'income' || !incomeMovement.to_account_id) {
+        throw new Error('Ingreso real inválido para aplicar distribución.');
+      }
+
+      if (incomeMovement.quincena_id !== distribution.quincenaId) {
+        throw new Error('Ingreso real inválido: quincena distinta a la distribución.');
+      }
+
+      const normalizedAppliedAt = normalizeToLocalDate(input.appliedAt);
+      const distributionQuincena = await this.getQuincenaById(distribution.quincenaId);
+      if (!distributionQuincena) {
+        throw new Error('Quincena de distribución no encontrada para aplicar.');
+      }
+
+      if (!isDateWithinQuincena(normalizedAppliedAt, distributionQuincena)) {
+        throw new Error('Fecha de aplicación fuera del rango de la quincena de la distribución.');
+      }
+
+      if (!isDateWithinQuincena(incomeMovement.occurred_at, distributionQuincena)) {
+        throw new Error('Ingreso real inválido: occurredAt fuera de la quincena de la distribución.');
+      }
+
+      const entries = distribution.entries;
+      const createdMovementIds: string[] = [];
+      for (const entry of entries) {
+        const movementId = `${input.distributionId}-${entry.id}`;
+        const escapedMovementId = movementId.replace(/'/g, "''");
+        if (entry.targetType === 'account') {
+          await this.db.execAsync(`
+            INSERT INTO operational_movements (
+              id, quincena_id, occurred_at, kind, amount, currency, from_account_id, to_account_id, category_id, note
+            ) VALUES (
+              '${escapedMovementId}',
+              '${distribution.quincenaId}',
+              '${normalizedAppliedAt}',
+              'transfer',
+              ${entry.allocated.amount},
+              '${entry.allocated.currency}',
+              '${incomeMovement.to_account_id}',
+              '${entry.targetId.replace(/'/g, "''")}',
+              NULL,
+              'payroll distribution apply'
+            );
+          `);
+        } else {
+          await this.db.execAsync(`
+            INSERT INTO operational_movements (
+              id, quincena_id, occurred_at, kind, amount, currency, from_account_id, to_account_id, category_id, note
+            ) VALUES (
+              '${escapedMovementId}',
+              '${distribution.quincenaId}',
+              '${normalizedAppliedAt}',
+              'expense',
+              ${entry.allocated.amount},
+              '${entry.allocated.currency}',
+              '${incomeMovement.to_account_id}',
+              NULL,
+              '${entry.targetId.replace(/'/g, "''")}',
+              'payroll distribution apply'
+            );
+          `);
+        }
+
+        createdMovementIds.push(movementId);
+      }
+
+      await this.db.execAsync(`
+        INSERT INTO payroll_distribution_applications (id, distribution_id, income_movement_id, applied_at)
+        VALUES ('${input.applicationId.replace(/'/g, "''")}', '${input.distributionId.replace(/'/g, "''")}', '${input.incomeMovementId.replace(/'/g, "''")}', '${normalizedAppliedAt}');
+      `);
+
+      await this.db.execAsync(`
+        UPDATE payroll_distributions
+        SET status = 'applied', income_movement_id = '${input.incomeMovementId.replace(/'/g, "''")}', applied_at = '${normalizedAppliedAt}', updated_at = CURRENT_TIMESTAMP
+        WHERE id = '${input.distributionId.replace(/'/g, "''")}';
+      `);
+
+      const appliedDistribution = await this.getPayrollDistributionById(input.distributionId);
+      if (!appliedDistribution) throw new Error('No se pudo confirmar distribución aplicada.');
+
+      return {
+        distribution: appliedDistribution,
+        application: {
+          id: input.applicationId,
+          distributionId: input.distributionId,
+          incomeMovementId: input.incomeMovementId,
+          appliedAt: normalizedAppliedAt,
+        },
+        createdMovementIds,
+        alreadyApplied: false,
+      };
+    });
+  }
+
   private mapQuincena(row: QuincenaRow): Quincena {
     return {
       id: row.id as QuincenaId,
       startsAt: row.starts_at as Quincena['startsAt'],
       endsAt: row.ends_at as Quincena['endsAt'],
       label: row.label,
+    };
+  }
+
+  private async mapPayrollDistribution(row: PayrollDistributionRow): Promise<PayrollDistribution> {
+    const entryRows = await this.db.getAllAsync<PayrollDistributionEntryRow>(
+      `SELECT id, distribution_id, target_type, target_id, allocated_amount, currency, sort_order
+       FROM payroll_distribution_entries
+       WHERE distribution_id = ?
+       ORDER BY sort_order ASC;`,
+      [row.id],
+    );
+
+    return {
+      id: row.id,
+      quincenaId: row.quincena_id,
+      total: {
+        amount: row.total_amount,
+        currency: row.currency === DEFAULT_CURRENCY ? DEFAULT_CURRENCY : DEFAULT_CURRENCY,
+      },
+      status: row.status,
+      incomeMovementId: row.income_movement_id,
+      appliedAt: row.applied_at,
+      entries: entryRows.map((entry) => this.mapPayrollDistributionEntry(entry)),
+    };
+  }
+
+  private mapPayrollDistributionEntry(row: PayrollDistributionEntryRow): PayrollDistributionEntry {
+    return {
+      id: row.id,
+      distributionId: row.distribution_id,
+      targetType: row.target_type,
+      targetId: row.target_id,
+      allocated: {
+        amount: row.allocated_amount,
+        currency: row.currency === DEFAULT_CURRENCY ? DEFAULT_CURRENCY : DEFAULT_CURRENCY,
+      },
+      sortOrder: row.sort_order,
+    };
+  }
+
+  private mapPayrollDistributionApplication(row: PayrollDistributionApplicationRow): PayrollDistributionApplication {
+    return {
+      id: row.id,
+      distributionId: row.distribution_id,
+      incomeMovementId: row.income_movement_id,
+      appliedAt: row.applied_at,
     };
   }
 }

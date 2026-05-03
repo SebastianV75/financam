@@ -204,4 +204,389 @@ describe('SQLiteFinanceRepository', () => {
     expect(mockDb.getAllAsync).toHaveBeenCalledWith(expect.stringContaining('FROM operational_movements'), ['q1']);
     expect(mockDb.getAllAsync).not.toHaveBeenCalledWith(expect.stringContaining('FROM financial_plans'), ['q1']);
   });
+
+  it('guarda borrador de payroll distribution con entries válidos', async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ allocated_total: 800 })
+      .mockResolvedValueOnce({
+        id: 'pd-1',
+        quincena_id: 'q1',
+        total_amount: 1000,
+        currency: 'MXN',
+        status: 'draft',
+        income_movement_id: null,
+        applied_at: null,
+      });
+    mockDb.getAllAsync.mockResolvedValue([
+      {
+        id: 'pde-1',
+        distribution_id: 'pd-1',
+        target_type: 'account',
+        target_id: 'a2',
+        allocated_amount: 800,
+        currency: 'MXN',
+        sort_order: 1,
+      },
+    ]);
+
+    const result = await repository.savePayrollDistributionDraft({
+      id: 'pd-1',
+      quincenaId: 'q1',
+      total: { amount: 1000, currency: 'MXN' },
+      entries: [
+        {
+          id: 'pde-1',
+          distributionId: 'pd-1',
+          targetType: 'account',
+          targetId: 'a2',
+          allocated: { amount: 800, currency: 'MXN' },
+          sortOrder: 1,
+        },
+      ],
+    });
+
+    expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO payroll_distributions'));
+    expect(mockDb.execAsync).not.toHaveBeenCalledWith(expect.stringContaining('INSERT INTO operational_movements'));
+    expect(result.entries).toHaveLength(1);
+  });
+
+  it('sin apply no crea operational_movements para la distribución', async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ allocated_total: 1000 })
+      .mockResolvedValueOnce({
+        id: 'pd-1',
+        quincena_id: 'q1',
+        total_amount: 1000,
+        currency: 'MXN',
+        status: 'draft',
+        income_movement_id: null,
+        applied_at: null,
+      });
+
+    mockDb.getAllAsync.mockResolvedValue([
+      {
+        id: 'pde-1',
+        distribution_id: 'pd-1',
+        target_type: 'account',
+        target_id: 'a2',
+        allocated_amount: 1000,
+        currency: 'MXN',
+        sort_order: 1,
+      },
+    ]);
+
+    await repository.savePayrollDistributionDraft({
+      id: 'pd-1',
+      quincenaId: 'q1',
+      total: { amount: 1000, currency: 'MXN' },
+      entries: [
+        {
+          id: 'pde-1',
+          distributionId: 'pd-1',
+          targetType: 'account',
+          targetId: 'a2',
+          allocated: { amount: 1000, currency: 'MXN' },
+          sortOrder: 1,
+        },
+      ],
+    });
+
+    const sqlCalls = mockDb.execAsync.mock.calls.map((call) => String(call[0]));
+    expect(sqlCalls.some((sql) => sql.includes('INSERT INTO operational_movements'))).toBe(false);
+  });
+
+  it('rechaza borrador cuando SUM(entries) excede total', async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ allocated_total: 1200 });
+
+    await expect(
+      repository.savePayrollDistributionDraft({
+        id: 'pd-1',
+        quincenaId: 'q1',
+        total: { amount: 1000, currency: 'MXN' },
+        entries: [
+          {
+            id: 'pde-1',
+            distributionId: 'pd-1',
+            targetType: 'account',
+            targetId: 'a2',
+            allocated: { amount: 1200, currency: 'MXN' },
+            sortOrder: 1,
+          },
+        ],
+      }),
+    ).rejects.toThrow('excede');
+  });
+
+  it('bloquea edición de distribución aplicada', async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({
+      id: 'pd-1',
+      quincena_id: 'q1',
+      total_amount: 1000,
+      currency: 'MXN',
+      status: 'applied',
+      income_movement_id: 'income-1',
+      applied_at: '2026-05-05',
+    });
+
+    await expect(
+      repository.savePayrollDistributionDraft({
+        id: 'pd-1',
+        quincenaId: 'q1',
+        total: { amount: 1000, currency: 'MXN' },
+        entries: [],
+      }),
+    ).rejects.toThrow('ya aplicada');
+  });
+
+  it('aplica distribución y genera transfer/expense con trazabilidad', async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 'pd-1',
+        quincena_id: 'q1',
+        total_amount: 1000,
+        currency: 'MXN',
+        status: 'draft',
+        income_movement_id: null,
+        applied_at: null,
+      })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'income-1',
+        quincena_id: 'q1',
+        occurred_at: '2026-05-10',
+        kind: 'income',
+        amount: 1000,
+        currency: 'MXN',
+        from_account_id: null,
+        to_account_id: 'a1',
+        category_id: 'cat-income',
+        note: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'q1',
+        starts_at: '2026-05-01',
+        ends_at: '2026-05-15',
+        label: 'Q1',
+      })
+      .mockResolvedValueOnce({
+        id: 'pd-1',
+        quincena_id: 'q1',
+        total_amount: 1000,
+        currency: 'MXN',
+        status: 'applied',
+        income_movement_id: 'income-1',
+        applied_at: '2026-05-10',
+      });
+
+    mockDb.getAllAsync.mockResolvedValue([
+      {
+        id: 'e-1',
+        distribution_id: 'pd-1',
+        target_type: 'account',
+        target_id: 'a2',
+        allocated_amount: 700,
+        currency: 'MXN',
+        sort_order: 1,
+      },
+      {
+        id: 'e-2',
+        distribution_id: 'pd-1',
+        target_type: 'category',
+        target_id: 'c1',
+        allocated_amount: 300,
+        currency: 'MXN',
+        sort_order: 2,
+      },
+    ]);
+
+    const result = await repository.applyPayrollDistribution({
+      applicationId: 'app-1',
+      distributionId: 'pd-1',
+      incomeMovementId: 'income-1',
+      appliedAt: '2026-05-10',
+    });
+
+    expect(result.alreadyApplied).toBe(false);
+    expect(result.createdMovementIds).toHaveLength(2);
+    expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO payroll_distribution_applications'));
+    expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("'transfer'"));
+    expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining("'expense'"));
+  });
+
+  it('aplicar por segunda vez no duplica movimientos (idempotencia fuerte)', async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 'pd-1',
+        quincena_id: 'q1',
+        total_amount: 1000,
+        currency: 'MXN',
+        status: 'applied',
+        income_movement_id: 'income-1',
+        applied_at: '2026-05-10',
+      })
+      .mockResolvedValueOnce({
+        id: 'app-1',
+        distribution_id: 'pd-1',
+        income_movement_id: 'income-1',
+        applied_at: '2026-05-10',
+      })
+      .mockResolvedValueOnce({
+        id: 'pd-1',
+        quincena_id: 'q1',
+        total_amount: 1000,
+        currency: 'MXN',
+        status: 'applied',
+        income_movement_id: 'income-1',
+        applied_at: '2026-05-10',
+      });
+
+    mockDb.getAllAsync.mockResolvedValue([]);
+
+    const result = await repository.applyPayrollDistribution({
+      applicationId: 'app-2',
+      distributionId: 'pd-1',
+      incomeMovementId: 'income-1',
+      appliedAt: '2026-05-10',
+    });
+
+    expect(result.alreadyApplied).toBe(true);
+    expect(result.createdMovementIds).toEqual([]);
+  });
+
+  it('rechaza apply si el ingreso pertenece a otra quincena', async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 'pd-1',
+        quincena_id: 'q1',
+        total_amount: 1000,
+        currency: 'MXN',
+        status: 'draft',
+        income_movement_id: null,
+        applied_at: null,
+      })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'income-1',
+        quincena_id: 'q2',
+        occurred_at: '2026-05-10',
+        kind: 'income',
+        amount: 1000,
+        currency: 'MXN',
+        from_account_id: null,
+        to_account_id: 'a1',
+        category_id: null,
+        note: null,
+      });
+    mockDb.getAllAsync.mockResolvedValue([{ id: 'e-1', distribution_id: 'pd-1', target_type: 'account', target_id: 'a2', allocated_amount: 1000, currency: 'MXN', sort_order: 1 }]);
+
+    await expect(
+      repository.applyPayrollDistribution({
+        applicationId: 'app-1',
+        distributionId: 'pd-1',
+        incomeMovementId: 'income-1',
+        appliedAt: '2026-05-10',
+      }),
+    ).rejects.toThrow('quincena distinta');
+  });
+
+  it('rechaza apply si appliedAt está fuera del rango de la quincena', async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 'pd-1',
+        quincena_id: 'q1',
+        total_amount: 1000,
+        currency: 'MXN',
+        status: 'draft',
+        income_movement_id: null,
+        applied_at: null,
+      })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'income-1',
+        quincena_id: 'q1',
+        occurred_at: '2026-05-10',
+        kind: 'income',
+        amount: 1000,
+        currency: 'MXN',
+        from_account_id: null,
+        to_account_id: 'a1',
+        category_id: null,
+        note: null,
+      })
+      .mockResolvedValueOnce({
+        id: 'q1',
+        starts_at: '2026-05-01',
+        ends_at: '2026-05-15',
+        label: 'Q1',
+      });
+    mockDb.getAllAsync.mockResolvedValue([{ id: 'e-1', distribution_id: 'pd-1', target_type: 'account', target_id: 'a2', allocated_amount: 1000, currency: 'MXN', sort_order: 1 }]);
+
+    await expect(
+      repository.applyPayrollDistribution({
+        applicationId: 'app-1',
+        distributionId: 'pd-1',
+        incomeMovementId: 'income-1',
+        appliedAt: '2026-05-20',
+      }),
+    ).rejects.toThrow('Fecha de aplicación fuera del rango');
+  });
+
+  it('lista solo movimientos creados por la distribución aplicada', async () => {
+    mockDb.getFirstAsync.mockResolvedValue({
+      id: 'pd-1',
+      quincena_id: 'q1',
+      total_amount: 1000,
+      currency: 'MXN',
+      status: 'applied',
+      income_movement_id: 'income-1',
+      applied_at: '2026-05-10',
+    });
+    mockDb.getAllAsync
+      .mockResolvedValueOnce([
+        {
+          id: 'e-1',
+          distribution_id: 'pd-1',
+          target_type: 'account',
+          target_id: 'a2',
+          allocated_amount: 700,
+          currency: 'MXN',
+          sort_order: 1,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'pd-1-e-1',
+          quincena_id: 'q1',
+          occurred_at: '2026-05-10',
+          kind: 'transfer',
+          amount: 700,
+          currency: 'MXN',
+          from_account_id: 'a1',
+          to_account_id: 'a2',
+          category_id: null,
+          note: 'payroll distribution apply',
+        },
+        {
+          id: 'other-movement',
+          quincena_id: 'q1',
+          occurred_at: '2026-05-11',
+          kind: 'expense',
+          amount: 100,
+          currency: 'MXN',
+          from_account_id: 'a1',
+          to_account_id: null,
+          category_id: 'c1',
+          note: 'manual',
+        },
+      ]);
+
+    const movements = await repository.listAppliedMovementsByDistribution('pd-1');
+
+    expect(movements).toHaveLength(1);
+    expect(movements[0].id).toBe('pd-1-e-1');
+  });
 });

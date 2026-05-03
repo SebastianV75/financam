@@ -15,7 +15,7 @@ describe('migrateDatabase', () => {
       0,
     );
 
-    expect(applied).toEqual([1, 2, 3]);
+    expect(applied).toEqual([1, 2, 3, 4]);
     expect(execAsync).toHaveBeenCalledWith(FOUNDATION_MIGRATIONS[0].sql);
     expect(execAsync).toHaveBeenCalledWith(FOUNDATION_MIGRATIONS[1].sql);
     expect(execAsync).toHaveBeenCalledWith(
@@ -24,7 +24,8 @@ describe('migrateDatabase', () => {
     expect(execAsync).toHaveBeenCalledWith('PRAGMA user_version = 1;');
     expect(execAsync).toHaveBeenCalledWith('PRAGMA user_version = 2;');
     expect(execAsync).toHaveBeenCalledWith('PRAGMA user_version = 3;');
-    expect(withTransaction).toHaveBeenCalledTimes(3);
+    expect(execAsync).toHaveBeenCalledWith('PRAGMA user_version = 4;');
+    expect(withTransaction).toHaveBeenCalledTimes(4);
   });
 
   it('define migración v2 con rebuild e índices', () => {
@@ -43,5 +44,15 @@ describe('migrateDatabase', () => {
     expect(sql).toContain('idx_quincenas_starts_at');
     expect(sql).toContain('idx_quincenas_ends_at');
     expect(sql).toContain('idx_operational_movements_quincena_occurred_at');
+  });
+
+  it('define migración v4 con payroll distributions y idempotencia de aplicación', () => {
+    const sql = FOUNDATION_MIGRATIONS[3].sql;
+
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS payroll_distributions');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS payroll_distribution_entries');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS payroll_distribution_applications');
+    expect(sql).toContain('distribution_id TEXT NOT NULL UNIQUE');
+    expect(sql).toContain('idx_payroll_distribution_entries_distribution');
   });
 });

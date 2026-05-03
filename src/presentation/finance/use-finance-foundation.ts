@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { createOperationalMovement, getFinanceFoundation } from '@/application/finance';
+import { createOperationalMovement, getFinanceFoundation, getPayrollDistribution } from '@/application/finance';
 import { SQLiteFinanceRepository } from '@/infrastructure/repositories/sqlite-finance-repository';
 import { toDatabaseClient } from '@/infrastructure/db/client';
 import { useDatabaseContext } from '@/infrastructure/db/provider';
@@ -26,6 +26,7 @@ export function useFinanceFoundation() {
   const [activeQuincena, setActiveQuincena] = useState<{ id: string; label: string; startsAt: string; endsAt: string } | null>(
     null,
   );
+  const [payrollDistribution, setPayrollDistribution] = useState<Awaited<ReturnType<typeof getPayrollDistribution>>>(null);
 
   const repository = useMemo(() => {
     if (!db) return null;
@@ -57,6 +58,9 @@ export function useFinanceFoundation() {
         setBalances(result.balances);
         setMovements(result.movements);
         setActiveQuincena(result.quincena);
+        const distribution = await getPayrollDistribution(activeRepository, { quincenaId: result.quincena.id });
+        if (!isMounted) return;
+        setPayrollDistribution(distribution);
         setError(null);
         setState('ready');
       } catch (loadError) {
@@ -114,11 +118,24 @@ export function useFinanceFoundation() {
     setBalances(refreshed.balances);
     setMovements(refreshed.movements);
     setActiveQuincena(refreshed.quincena);
+    const distribution = await getPayrollDistribution(repository, { quincenaId: refreshed.quincena.id });
+    setPayrollDistribution(distribution);
   }
 
   if (!activeQuincena && state === 'ready') {
     throw new Error('No se pudo resolver quincena activa.');
   }
 
-  return { summary, accounts, categories, balances, movements, activeQuincena, createQuickMovement, error, state };
+  return {
+    summary,
+    accounts,
+    categories,
+    balances,
+    movements,
+    payrollDistribution,
+    activeQuincena,
+    createQuickMovement,
+    error,
+    state,
+  };
 }

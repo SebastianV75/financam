@@ -182,6 +182,188 @@ describe('Offline/Local-First Operation', () => {
       ).toBeGreaterThanOrEqual(2);
     });
 
+    it('opera create/get/apply de payroll distribution completamente offline', async () => {
+      const distributionRows = new Map<
+        string,
+        {
+          id: string;
+          quincena_id: string;
+          total_amount: number;
+          currency: string;
+          status: 'draft' | 'applied';
+          income_movement_id: string | null;
+          applied_at: string | null;
+        }
+      >();
+      const entryRows = new Map<
+        string,
+        Array<{
+          id: string;
+          distribution_id: string;
+          target_type: 'account' | 'category';
+          target_id: string;
+          allocated_amount: number;
+          currency: string;
+          sort_order: number;
+        }>
+      >();
+
+      const mockDb = {
+        execAsync: jest.fn().mockImplementation(async (sql: string) => {
+          if (sql.includes("INSERT INTO payroll_distributions")) {
+            distributionRows.set('pd-1', {
+              id: 'pd-1',
+              quincena_id: 'q-2024-01',
+              total_amount: 12000,
+              currency: 'MXN',
+              status: 'draft',
+              income_movement_id: null,
+              applied_at: null,
+            });
+          }
+
+          if (sql.includes("INSERT INTO payroll_distribution_entries")) {
+            entryRows.set('pd-1', [
+              {
+                id: 'e-1',
+                distribution_id: 'pd-1',
+                target_type: 'account',
+                target_id: 'acc-2',
+                allocated_amount: 12000,
+                currency: 'MXN',
+                sort_order: 1,
+              },
+            ]);
+          }
+
+          if (sql.includes("UPDATE payroll_distributions") && sql.includes("status = 'applied'")) {
+            distributionRows.set('pd-1', {
+              id: 'pd-1',
+              quincena_id: 'q-2024-01',
+              total_amount: 12000,
+              currency: 'MXN',
+              status: 'applied',
+              income_movement_id: 'income-1',
+              applied_at: '2024-01-10',
+            });
+          }
+        }),
+        getFirstAsync: jest.fn().mockImplementation(async (sql: string, params?: unknown[]) => {
+          if (sql.includes('PRAGMA user_version')) return { user_version: 4 };
+          if (sql.includes('FROM quincenas WHERE id = ?')) {
+            return {
+              id: 'q-2024-01',
+              starts_at: '2024-01-01',
+              ends_at: '2024-01-15',
+              label: 'Q1',
+            };
+          }
+          if (sql.includes('FROM payroll_distribution_applications')) return null;
+          if (sql.includes('FROM payroll_distributions') && sql.includes('WHERE id = ?')) {
+            return (
+              distributionRows.get(String(params?.[0])) ?? {
+                id: 'pd-1',
+                quincena_id: 'q-2024-01',
+                total_amount: 12000,
+                currency: 'MXN',
+                status: 'draft',
+                income_movement_id: null,
+                applied_at: null,
+              }
+            );
+          }
+          if (sql.includes('FROM operational_movements') && sql.includes('WHERE id = ?')) {
+            return {
+              id: 'income-1',
+              quincena_id: 'q-2024-01',
+              occurred_at: '2024-01-10',
+              kind: 'income',
+              amount: 12000,
+              currency: 'MXN',
+              from_account_id: null,
+              to_account_id: 'acc-1',
+              category_id: null,
+              note: null,
+            };
+          }
+          if (sql.includes('SUM(allocated_amount)')) return { allocated_total: 12000 };
+          return null;
+        }),
+        getAllAsync: jest.fn().mockImplementation(async (sql: string, params?: unknown[]) => {
+          if (sql.includes('FROM payroll_distribution_entries')) {
+            return (
+              entryRows.get(String(params?.[0])) ?? [
+                {
+                  id: 'e-1',
+                  distribution_id: 'pd-1',
+                  target_type: 'account',
+                  target_id: 'acc-2',
+                  allocated_amount: 12000,
+                  currency: 'MXN',
+                  sort_order: 1,
+                },
+              ]
+            );
+          }
+          if (sql.includes('FROM operational_movements') && sql.includes('WHERE quincena_id = ?')) {
+            return [
+              {
+                id: 'pd-1-e-1',
+                quincena_id: 'q-2024-01',
+                occurred_at: '2024-01-10',
+                kind: 'transfer',
+                amount: 12000,
+                currency: 'MXN',
+                from_account_id: 'acc-1',
+                to_account_id: 'acc-2',
+                category_id: null,
+                note: 'payroll distribution apply',
+              },
+            ];
+          }
+          return [];
+        }),
+      };
+
+      MockedOpenDatabase.mockResolvedValue(mockDb as never);
+
+      const { openFinanceDatabase, toDatabaseClient } = await import('@/infrastructure/db/client');
+      const db = await openFinanceDatabase();
+      const client = toDatabaseClient(db);
+      const repository = new SQLiteFinanceRepository(client);
+
+      await repository.savePayrollDistributionDraft({
+        id: 'pd-1',
+        quincenaId: 'q-2024-01',
+        total: { amount: 12000, currency: 'MXN' },
+        entries: [
+          {
+            id: 'e-1',
+            distributionId: 'pd-1',
+            targetType: 'account',
+            targetId: 'acc-2',
+            allocated: { amount: 12000, currency: 'MXN' },
+            sortOrder: 1,
+          },
+        ],
+      });
+
+      const fetched = await repository.getPayrollDistributionById('pd-1');
+      expect(fetched?.status).toBe('draft');
+
+      await repository.applyPayrollDistribution({
+        applicationId: 'app-1',
+        distributionId: 'pd-1',
+        incomeMovementId: 'income-1',
+        appliedAt: '2024-01-10',
+      });
+
+      const appliedMovements = await repository.listAppliedMovementsByDistribution('pd-1');
+      expect(appliedMovements).toHaveLength(1);
+      expect(appliedMovements[0].id).toBe('pd-1-e-1');
+      expect(MockedOpenDatabase).toHaveBeenCalledWith('financam.db');
+    });
+
     it('arquitectura no asume sincronización remota en foundation', async () => {
       // GIVEN: Solo tenemos métodos de persistencia local
       const mockDb = {

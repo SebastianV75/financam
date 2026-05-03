@@ -86,6 +86,56 @@ export interface AccountBalance {
   balance: Money;
 }
 
+export type PayrollDistributionStatus = 'draft' | 'applied';
+export type PayrollDistributionTargetType = 'account' | 'category';
+
+export interface PayrollDistributionEntry {
+  id: string;
+  distributionId: string;
+  targetType: PayrollDistributionTargetType;
+  targetId: string;
+  allocated: Money;
+  sortOrder: number;
+}
+
+export interface PayrollDistribution {
+  id: string;
+  quincenaId: QuincenaId;
+  total: Money;
+  status: PayrollDistributionStatus;
+  incomeMovementId: string | null;
+  appliedAt: string | null;
+  entries: PayrollDistributionEntry[];
+}
+
+export interface PayrollDistributionApplication {
+  id: string;
+  distributionId: string;
+  incomeMovementId: string | null;
+  appliedAt: string;
+}
+
+export interface SavePayrollDistributionDraftInput {
+  id: string;
+  quincenaId: QuincenaId;
+  total: Money;
+  entries: PayrollDistributionEntry[];
+}
+
+export interface ApplyPayrollDistributionInput {
+  applicationId: string;
+  distributionId: string;
+  incomeMovementId: string;
+  appliedAt: string;
+}
+
+export interface ApplyPayrollDistributionResult {
+  distribution: PayrollDistribution;
+  application: PayrollDistributionApplication;
+  createdMovementIds: string[];
+  alreadyApplied: boolean;
+}
+
 export interface OperationalSnapshot {
   quincena: Quincena;
   movements: OperationalMovementRecord[];

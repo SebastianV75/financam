@@ -5,11 +5,15 @@ import type {
   CreateAccountInput,
   CreateCategoryInput,
   FinancialPlanRecord,
+  ApplyPayrollDistributionInput,
+  ApplyPayrollDistributionResult,
   OperationalSnapshot,
   Quincena,
   OperationalMovementDraft,
   OperationalMovementRecord,
+  PayrollDistribution,
   QuincenaId,
+  SavePayrollDistributionDraftInput,
 } from './types';
 
 export interface FinanceRepository {
@@ -25,4 +29,9 @@ export interface FinanceRepository {
   createOperationalMovement(input: OperationalMovementDraft): Promise<OperationalMovementRecord>;
   listMovementsByQuincena(quincenaId: QuincenaId): Promise<OperationalMovementRecord[]>;
   getAccountBalances(): Promise<AccountBalance[]>;
+  savePayrollDistributionDraft(input: SavePayrollDistributionDraftInput): Promise<PayrollDistribution>;
+  getPayrollDistributionByQuincena(quincenaId: QuincenaId): Promise<PayrollDistribution | null>;
+  getPayrollDistributionById(distributionId: string): Promise<PayrollDistribution | null>;
+  applyPayrollDistribution(input: ApplyPayrollDistributionInput): Promise<ApplyPayrollDistributionResult>;
+  listAppliedMovementsByDistribution(distributionId: string): Promise<OperationalMovementRecord[]>;
 }
