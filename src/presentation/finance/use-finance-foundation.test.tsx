@@ -46,6 +46,8 @@ describe('useFinanceFoundation', () => {
       categories: [],
       balances: [],
       movements: [],
+      goals: [],
+      debts: [],
       quincena: {
         id: 'q1',
         label: 'Q1',
@@ -77,6 +79,8 @@ describe('useFinanceFoundation', () => {
       categories: [],
       balances: [],
       movements: [],
+      goals: [],
+      debts: [],
       quincena: {
         id: 'q1',
         label: 'Q1',

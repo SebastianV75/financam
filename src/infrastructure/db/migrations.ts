@@ -203,6 +203,49 @@ export const FOUNDATION_MIGRATIONS: Migration[] = [
         ON fixed_expense_projections(fixed_expense_id, quincena_id);
     `,
   },
+  {
+    version: 6,
+    name: '0006_goals_and_debts_core',
+    sql: `
+      CREATE TABLE IF NOT EXISTS savings_goals (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        target_amount INTEGER NOT NULL,
+        current_amount INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'MXN',
+        target_date TEXT,
+        account_id TEXT,
+        category_id TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (account_id) REFERENCES accounts (id),
+        FOREIGN KEY (category_id) REFERENCES categories (id)
+      );
+
+      CREATE TABLE IF NOT EXISTS debts (
+        id TEXT PRIMARY KEY NOT NULL,
+        account_id TEXT NOT NULL UNIQUE,
+        principal_amount INTEGER NOT NULL,
+        current_balance INTEGER NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'MXN',
+        interest_rate REAL,
+        min_payment INTEGER,
+        due_day INTEGER,
+        status TEXT NOT NULL CHECK(status IN ('active', 'paid')) DEFAULT 'active',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (account_id) REFERENCES accounts (id)
+      );
+
+      ALTER TABLE operational_movements ADD COLUMN goal_id TEXT;
+      ALTER TABLE operational_movements ADD COLUMN debt_id TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_operational_movements_goal_id ON operational_movements(goal_id);
+      CREATE INDEX IF NOT EXISTS idx_operational_movements_debt_id ON operational_movements(debt_id);
+      CREATE INDEX IF NOT EXISTS idx_savings_goals_account_id ON savings_goals(account_id);
+      CREATE INDEX IF NOT EXISTS idx_debts_account_id ON debts(account_id);
+    `,
+  },
 ];
 
 export async function migrateDatabase(

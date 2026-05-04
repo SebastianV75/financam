@@ -15,7 +15,7 @@ describe('migrateDatabase', () => {
       0,
     );
 
-    expect(applied).toEqual([1, 2, 3, 4, 5]);
+    expect(applied).toEqual([1, 2, 3, 4, 5, 6]);
     expect(execAsync).toHaveBeenCalledWith(FOUNDATION_MIGRATIONS[0].sql);
     expect(execAsync).toHaveBeenCalledWith(FOUNDATION_MIGRATIONS[1].sql);
     expect(execAsync).toHaveBeenCalledWith(
@@ -26,7 +26,8 @@ describe('migrateDatabase', () => {
     expect(execAsync).toHaveBeenCalledWith('PRAGMA user_version = 3;');
     expect(execAsync).toHaveBeenCalledWith('PRAGMA user_version = 4;');
     expect(execAsync).toHaveBeenCalledWith('PRAGMA user_version = 5;');
-    expect(withTransaction).toHaveBeenCalledTimes(5);
+    expect(execAsync).toHaveBeenCalledWith('PRAGMA user_version = 6;');
+    expect(withTransaction).toHaveBeenCalledTimes(6);
   });
 
   it('define migración v2 con rebuild e índices', () => {
@@ -65,5 +66,14 @@ describe('migrateDatabase', () => {
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS fixed_expenses');
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS fixed_expense_projections');
     expect(sql).toContain('idx_fixed_expense_projections_quincena');
+  });
+
+  it('define migración v6 para metas/deudas y links operativos nullable', () => {
+    const sql = FOUNDATION_MIGRATIONS[5].sql;
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS savings_goals');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS debts');
+    expect(sql).toContain('ALTER TABLE operational_movements ADD COLUMN goal_id');
+    expect(sql).toContain('ALTER TABLE operational_movements ADD COLUMN debt_id');
+    expect(sql).toContain('idx_operational_movements_goal_id');
   });
 });

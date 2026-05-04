@@ -42,6 +42,8 @@ export function FinanceScreen({ mode, subtitle, title }: FinanceScreenProps) {
         <Text className="mt-2 text-base text-text">Categorías: {summary.categories}</Text>
         <Text className="mt-2 text-base text-text">Movimientos: {summary.movements}</Text>
         <Text className="mt-2 text-base text-text">Saldos derivados: {summary.balances}</Text>
+        <Text className="mt-2 text-base text-text">Metas activas: {summary.goals}</Text>
+        <Text className="mt-2 text-base text-text">Deudas activas: {summary.debts}</Text>
         {mode === 'plan' ? (
           <>
             <Text className="mt-2 text-base text-text">Planes por quincena: {planningSummary.plans}</Text>

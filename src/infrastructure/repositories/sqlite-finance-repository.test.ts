@@ -765,4 +765,281 @@ describe('SQLiteFinanceRepository', () => {
     const sqlCalls = mockDb.execAsync.mock.calls.map((c) => String(c[0]));
     expect(sqlCalls.some((sql) => sql.includes('INSERT INTO fixed_expense_projections'))).toBe(false);
   });
+
+  it('rechaza crear deuda si la cuenta no es credit_card', async () => {
+    mockDb.getFirstAsync.mockResolvedValue({ id: 'a1', type: 'debit' });
+    await expect(
+      repository.createDebt({
+        id: 'd1',
+        accountId: 'a1',
+        principalAmount: { amount: 1000, currency: 'MXN' },
+        currentBalance: { amount: 1000, currency: 'MXN' },
+        interestRate: null,
+        minPayment: null,
+        dueDay: null,
+      }),
+    ).rejects.toThrow('Cuenta no elegible');
+  });
+
+  it('crea meta válida y queda disponible para lectura/listado con current_amount=0', async () => {
+    mockDb.getFirstAsync.mockResolvedValue({
+      id: 'g1',
+      name: 'Fondo emergencia',
+      target_amount: 10000,
+      current_amount: 0,
+      currency: 'MXN',
+      target_date: '2026-12-31',
+      account_id: null,
+      category_id: null,
+    });
+    mockDb.getAllAsync.mockResolvedValue([
+      {
+        id: 'g1',
+        name: 'Fondo emergencia',
+        target_amount: 10000,
+        current_amount: 0,
+        currency: 'MXN',
+        target_date: '2026-12-31',
+        account_id: null,
+        category_id: null,
+      },
+    ]);
+
+    const created = await repository.createSavingsGoal({
+      id: 'g1',
+      name: 'Fondo emergencia',
+      targetAmount: { amount: 10000, currency: 'MXN' },
+      targetDate: '2026-12-31',
+      accountId: null,
+      categoryId: null,
+    });
+    const listed = await repository.listSavingsGoals();
+
+    expect(created.currentAmount.amount).toBe(0);
+    expect(listed[0].id).toBe('g1');
+    expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO savings_goals'));
+    expect(mockDb.getAllAsync).toHaveBeenCalledWith(expect.stringContaining('FROM savings_goals ORDER BY created_at DESC'));
+  });
+
+  it('crea deuda válida en cuenta elegible y queda disponible para lectura', async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({ id: 'a-cc', type: 'credit_card' })
+      .mockResolvedValueOnce({
+        id: 'd1',
+        account_id: 'a-cc',
+        principal_amount: 5000,
+        current_balance: 5000,
+        currency: 'MXN',
+        interest_rate: 20,
+        min_payment: 500,
+        due_day: 10,
+        status: 'active',
+      });
+
+    const created = await repository.createDebt({
+      id: 'd1',
+      accountId: 'a-cc',
+      principalAmount: { amount: 5000, currency: 'MXN' },
+      currentBalance: { amount: 5000, currency: 'MXN' },
+      interestRate: 20,
+      minPayment: { amount: 500, currency: 'MXN' },
+      dueDay: 10,
+    });
+
+    expect(created.id).toBe('d1');
+    expect(created.currentBalance.amount).toBe(5000);
+    expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO debts'));
+  });
+
+  it('recordGoalContribution inserta movimiento y actualiza current_amount', async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({ id: 'g1', name: 'Meta', target_amount: 1000, current_amount: 100, currency: 'MXN', target_date: null, account_id: null, category_id: null })
+      .mockResolvedValueOnce({ id: 'q1', starts_at: '2026-05-01', ends_at: '2026-05-15', label: 'Q1' })
+      .mockResolvedValueOnce({ id: 'g1', name: 'Meta', target_amount: 1000, current_amount: 300, currency: 'MXN', target_date: null, account_id: null, category_id: null });
+
+    const result = await repository.recordGoalContribution({
+      id: 'm-goal',
+      quincenaId: 'q1',
+      occurredAt: '2026-05-02',
+      kind: 'income',
+      amount: { amount: 200, currency: 'MXN' },
+      fromAccountId: null,
+      toAccountId: 'a1',
+      categoryId: 'c1',
+      goalId: 'g1',
+    });
+
+    expect(result.goal.currentAmount.amount).toBe(300);
+    expect(result.movement.goalId).toBe('g1');
+    const sqlCalls = mockDb.execAsync.mock.calls.map((c) => String(c[0]));
+    expect(sqlCalls.some((sql) => sql.includes('UPDATE savings_goals'))).toBe(true);
+    expect(sqlCalls.some((sql) => sql.includes('INSERT INTO operational_movements') && sql.includes("'g1'"))).toBe(true);
+  });
+
+  it('recordDebtPayment aplica pago real y actualiza deuda; marca paid al liquidar', async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 'd1',
+        account_id: 'a-cc',
+        principal_amount: 1000,
+        current_balance: 300,
+        currency: 'MXN',
+        interest_rate: null,
+        min_payment: null,
+        due_day: null,
+        status: 'active',
+      })
+      .mockResolvedValueOnce({ id: 'q1', starts_at: '2026-05-01', ends_at: '2026-05-15', label: 'Q1' })
+      .mockResolvedValueOnce({
+        id: 'd1',
+        account_id: 'a-cc',
+        principal_amount: 1000,
+        current_balance: 0,
+        currency: 'MXN',
+        interest_rate: null,
+        min_payment: null,
+        due_day: null,
+        status: 'paid',
+      });
+
+    const result = await repository.recordDebtPayment({
+      id: 'm-debt-1',
+      quincenaId: 'q1',
+      occurredAt: '2026-05-05',
+      kind: 'expense',
+      amount: { amount: 300, currency: 'MXN' },
+      fromAccountId: 'a1',
+      toAccountId: null,
+      categoryId: 'c1',
+      debtId: 'd1',
+    });
+
+    expect(result.movement.debtId).toBe('d1');
+    expect(result.debt.currentBalance.amount).toBe(0);
+    expect(result.debt.status).toBe('paid');
+    const sqlCalls = mockDb.execAsync.mock.calls.map((c) => String(c[0]));
+    expect(sqlCalls.some((sql) => sql.includes('INSERT INTO operational_movements') && sql.includes("'d1'"))).toBe(true);
+    expect(sqlCalls.some((sql) => sql.includes('UPDATE debts'))).toBe(true);
+  });
+
+  it('planeación sin movimiento no inserta movimientos operativos', async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({
+        id: 'g1',
+        name: 'Meta',
+        target_amount: 1000,
+        current_amount: 0,
+        currency: 'MXN',
+        target_date: null,
+        account_id: null,
+        category_id: null,
+      })
+      .mockResolvedValueOnce({ id: 'a-cc', type: 'credit_card' })
+      .mockResolvedValueOnce({
+        id: 'd1',
+        account_id: 'a-cc',
+        principal_amount: 2000,
+        current_balance: 2000,
+        currency: 'MXN',
+        interest_rate: null,
+        min_payment: null,
+        due_day: null,
+        status: 'active',
+      });
+
+    await repository.createSavingsGoal({
+      id: 'g1',
+      name: 'Meta',
+      targetAmount: { amount: 1000, currency: 'MXN' },
+      targetDate: null,
+      accountId: null,
+      categoryId: null,
+    });
+    await repository.createDebt({
+      id: 'd1',
+      accountId: 'a-cc',
+      principalAmount: { amount: 2000, currency: 'MXN' },
+      currentBalance: { amount: 2000, currency: 'MXN' },
+      interestRate: null,
+      minPayment: null,
+      dueDay: null,
+    });
+
+    const sqlCalls = mockDb.execAsync.mock.calls.map((c) => String(c[0]));
+    expect(sqlCalls.some((sql) => sql.includes('INSERT INTO savings_goals'))).toBe(true);
+    expect(sqlCalls.some((sql) => sql.includes('INSERT INTO debts'))).toBe(true);
+    expect(sqlCalls.some((sql) => sql.includes('INSERT INTO operational_movements'))).toBe(false);
+  });
+
+  it('consulta offline específica de metas/deudas usa SQLite local', async () => {
+    mockDb.getAllAsync
+      .mockResolvedValueOnce([
+        {
+          id: 'g1',
+          name: 'Meta',
+          target_amount: 1000,
+          current_amount: 200,
+          currency: 'MXN',
+          target_date: null,
+          account_id: null,
+          category_id: null,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'd1',
+          account_id: 'a-cc',
+          principal_amount: 2000,
+          current_balance: 1500,
+          currency: 'MXN',
+          interest_rate: null,
+          min_payment: null,
+          due_day: null,
+          status: 'active',
+        },
+      ]);
+
+    const goals = await repository.listSavingsGoals();
+    const debts = await repository.listDebts();
+
+    expect(goals).toHaveLength(1);
+    expect(debts).toHaveLength(1);
+    expect(mockDb.getAllAsync).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('FROM savings_goals ORDER BY created_at DESC'),
+    );
+    expect(mockDb.getAllAsync).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('FROM debts ORDER BY created_at DESC'),
+    );
+  });
+
+  it('si falla insert de movimiento en aporte, no intenta mutar current_amount (fault handling)', async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({ id: 'g1', name: 'Meta', target_amount: 1000, current_amount: 100, currency: 'MXN', target_date: null, account_id: null, category_id: null })
+      .mockResolvedValueOnce({ id: 'q1', starts_at: '2026-05-01', ends_at: '2026-05-15', label: 'Q1' });
+    mockDb.execAsync.mockImplementation(async (query) => {
+      if (query.includes('INSERT INTO operational_movements')) {
+        throw new Error('sqlite busy');
+      }
+      return undefined;
+    });
+
+    await expect(
+      repository.recordGoalContribution({
+        id: 'm-goal-fail',
+        quincenaId: 'q1',
+        occurredAt: '2026-05-02',
+        kind: 'income',
+        amount: { amount: 200, currency: 'MXN' },
+        fromAccountId: null,
+        toAccountId: 'a1',
+        categoryId: 'c1',
+        goalId: 'g1',
+      }),
+    ).rejects.toThrow('sqlite busy');
+
+    const sqlCalls = mockDb.execAsync.mock.calls.map((c) => String(c[0]));
+    expect(sqlCalls.some((sql) => sql.includes('UPDATE savings_goals'))).toBe(false);
+  });
 });

@@ -4,6 +4,9 @@ import type {
   Category,
   CreateAccountInput,
   CreateCategoryInput,
+  Debt,
+  DebtDraft,
+  DebtSummary,
   CreateFixedExpenseInput,
   FinancialPlanRecord,
   FixedExpense,
@@ -11,6 +14,7 @@ import type {
   ApplyPayrollDistributionInput,
   ApplyPayrollDistributionResult,
   OperationalSnapshot,
+  LocalDateISO,
   Quincena,
   OperationalMovementDraft,
   OperationalMovementRecord,
@@ -18,6 +22,9 @@ import type {
   QuincenaId,
   SaveFinancialPlanInput,
   SavePayrollDistributionDraftInput,
+  SavingsGoal,
+  SavingsGoalDraft,
+  SavingsGoalSummary,
   UpdateFixedExpenseInput,
 } from './types';
 
@@ -47,4 +54,16 @@ export interface FinanceRepository {
   getPayrollDistributionById(distributionId: string): Promise<PayrollDistribution | null>;
   applyPayrollDistribution(input: ApplyPayrollDistributionInput): Promise<ApplyPayrollDistributionResult>;
   listAppliedMovementsByDistribution(distributionId: string): Promise<OperationalMovementRecord[]>;
+  createSavingsGoal(input: SavingsGoalDraft): Promise<SavingsGoal>;
+  updateSavingsGoal(input: SavingsGoalDraft): Promise<SavingsGoal>;
+  getSavingsGoalById(goalId: string): Promise<SavingsGoal | null>;
+  listSavingsGoals(): Promise<SavingsGoal[]>;
+  createDebt(input: DebtDraft): Promise<Debt>;
+  updateDebt(input: DebtDraft): Promise<Debt>;
+  getDebtById(debtId: string): Promise<Debt | null>;
+  listDebts(): Promise<Debt[]>;
+  recordGoalContribution(input: OperationalMovementDraft): Promise<{ movement: OperationalMovementRecord; goal: SavingsGoal }>;
+  recordDebtPayment(input: OperationalMovementDraft): Promise<{ movement: OperationalMovementRecord; debt: Debt }>;
+  getSavingsGoalSummary(goalId: string, asOfDate: LocalDateISO): Promise<SavingsGoalSummary>;
+  getDebtSummary(debtId: string): Promise<DebtSummary>;
 }

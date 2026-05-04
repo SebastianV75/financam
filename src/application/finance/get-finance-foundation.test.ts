@@ -13,6 +13,8 @@ describe('getFinanceFoundation', () => {
       listCategories: jest.fn().mockResolvedValue([{ id: 'c-1' }]),
       listMovementsByQuincena: jest.fn().mockResolvedValue([{ id: 'movement-1' }]),
       getAccountBalances: jest.fn().mockResolvedValue([{ accountId: 'a-1', balance: { amount: 100, currency: 'MXN' } }]),
+      listSavingsGoals: jest.fn().mockResolvedValue([{ id: 'g-1' }]),
+      listDebts: jest.fn().mockResolvedValue([{ id: 'd-1' }]),
     };
 
     const result = await getFinanceFoundation(repository as never, { date: new Date('2026-05-12') });
@@ -27,6 +29,8 @@ describe('getFinanceFoundation', () => {
       categories: [{ id: 'c-1' }],
       movements: [{ id: 'movement-1' }],
       balances: [{ accountId: 'a-1', balance: { amount: 100, currency: 'MXN' } }],
+      goals: [{ id: 'g-1' }],
+      debts: [{ id: 'd-1' }],
     });
   });
 });

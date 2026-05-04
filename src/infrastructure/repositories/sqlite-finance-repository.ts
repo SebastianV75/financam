@@ -2,8 +2,14 @@ import type {
   Account,
   AccountBalance,
   Category,
+  Debt,
+  DebtDraft,
+  DebtSummary,
   CreateAccountInput,
   CreateCategoryInput,
+  SavingsGoal,
+  SavingsGoalDraft,
+  SavingsGoalSummary,
   FinanceRepository,
   FinancialPlanRecord,
   SaveFinancialPlanInput,
@@ -29,6 +35,13 @@ import {
   normalizeToLocalDate,
   resolveQuincenaRange,
 } from '@/domain/finance/rules/pay-cycle';
+import {
+  calculateDebtPaidAmount,
+  calculateDebtProgress,
+  calculatePendingSavingsAmount,
+  calculateSavingsGoalProgress,
+  calculateSuggestedBiweeklyContribution,
+} from '@/domain/finance/rules/goals-and-debts';
 import { DEFAULT_CURRENCY } from '@/shared/constants/app';
 
 import type { DatabaseClient } from '@/infrastructure/db/types';
@@ -84,7 +97,32 @@ interface OperationalMovementRow {
   from_account_id: string | null;
   to_account_id: string | null;
   category_id: string | null;
+  goal_id: string | null;
+  debt_id: string | null;
   note: string | null;
+}
+
+interface SavingsGoalRow {
+  id: string;
+  name: string;
+  target_amount: number;
+  current_amount: number;
+  currency: string | null;
+  target_date: string | null;
+  account_id: string | null;
+  category_id: string | null;
+}
+
+interface DebtRow {
+  id: string;
+  account_id: string;
+  principal_amount: number;
+  current_balance: number;
+  currency: string | null;
+  interest_rate: number | null;
+  min_payment: number | null;
+  due_day: number | null;
+  status: 'active' | 'paid';
 }
 
 interface AccountRow {
@@ -253,10 +291,12 @@ export class SQLiteFinanceRepository implements FinanceRepository {
       const fromValue = input.fromAccountId ? `'${input.fromAccountId}'` : 'NULL';
       const toValue = input.toAccountId ? `'${input.toAccountId}'` : 'NULL';
       const categoryValue = input.categoryId ? `'${input.categoryId}'` : 'NULL';
+      const goalValue = input.goalId ? `'${input.goalId}'` : 'NULL';
+      const debtValue = input.debtId ? `'${input.debtId}'` : 'NULL';
       const noteValue = input.note ? `'${input.note.replace(/'/g, "''")}'` : 'NULL';
       await this.db.execAsync(`
         INSERT INTO operational_movements (
-          id, quincena_id, occurred_at, kind, amount, currency, from_account_id, to_account_id, category_id, note
+          id, quincena_id, occurred_at, kind, amount, currency, from_account_id, to_account_id, category_id, goal_id, debt_id, note
         ) VALUES (
           '${input.id}',
           '${input.quincenaId}',
@@ -267,6 +307,8 @@ export class SQLiteFinanceRepository implements FinanceRepository {
           ${fromValue},
           ${toValue},
           ${categoryValue},
+          ${goalValue},
+          ${debtValue},
           ${noteValue}
         );
       `);
@@ -280,6 +322,8 @@ export class SQLiteFinanceRepository implements FinanceRepository {
         fromAccountId: input.fromAccountId,
         toAccountId: input.toAccountId,
         categoryId: input.categoryId,
+        goalId: input.goalId ?? null,
+        debtId: input.debtId ?? null,
         note: input.note ?? null,
       };
     });
@@ -468,7 +512,7 @@ export class SQLiteFinanceRepository implements FinanceRepository {
 
   async listMovementsByQuincena(quincenaId: QuincenaId): Promise<OperationalMovementRecord[]> {
     const rows = await this.db.getAllAsync<OperationalMovementRow>(
-      `SELECT id, quincena_id, occurred_at, kind, amount, currency, from_account_id, to_account_id, category_id, note
+      `SELECT id, quincena_id, occurred_at, kind, amount, currency, from_account_id, to_account_id, category_id, goal_id, debt_id, note
        FROM operational_movements
        WHERE quincena_id = ?
        ORDER BY occurred_at DESC;`,
@@ -487,6 +531,8 @@ export class SQLiteFinanceRepository implements FinanceRepository {
         fromAccountId: row.from_account_id,
         toAccountId: row.to_account_id,
         categoryId: row.category_id,
+        goalId: row.goal_id,
+        debtId: row.debt_id,
         note: row.note,
       }));
   }
@@ -642,7 +688,7 @@ export class SQLiteFinanceRepository implements FinanceRepository {
       }
 
       const incomeMovement = await this.db.getFirstAsync<OperationalMovementRow>(
-        `SELECT id, quincena_id, occurred_at, kind, amount, currency, from_account_id, to_account_id, category_id, note
+        `SELECT id, quincena_id, occurred_at, kind, amount, currency, from_account_id, to_account_id, category_id, goal_id, debt_id, note
          FROM operational_movements
          WHERE id = ?
          LIMIT 1;`,
@@ -678,7 +724,7 @@ export class SQLiteFinanceRepository implements FinanceRepository {
         if (entry.targetType === 'account') {
           await this.db.execAsync(`
             INSERT INTO operational_movements (
-              id, quincena_id, occurred_at, kind, amount, currency, from_account_id, to_account_id, category_id, note
+              id, quincena_id, occurred_at, kind, amount, currency, from_account_id, to_account_id, category_id, goal_id, debt_id, note
             ) VALUES (
               '${escapedMovementId}',
               '${distribution.quincenaId}',
@@ -689,13 +735,15 @@ export class SQLiteFinanceRepository implements FinanceRepository {
               '${incomeMovement.to_account_id}',
               '${entry.targetId.replace(/'/g, "''")}',
               NULL,
+              NULL,
+              NULL,
               'payroll distribution apply'
             );
           `);
         } else {
           await this.db.execAsync(`
             INSERT INTO operational_movements (
-              id, quincena_id, occurred_at, kind, amount, currency, from_account_id, to_account_id, category_id, note
+              id, quincena_id, occurred_at, kind, amount, currency, from_account_id, to_account_id, category_id, goal_id, debt_id, note
             ) VALUES (
               '${escapedMovementId}',
               '${distribution.quincenaId}',
@@ -706,6 +754,8 @@ export class SQLiteFinanceRepository implements FinanceRepository {
               '${incomeMovement.to_account_id}',
               NULL,
               '${entry.targetId.replace(/'/g, "''")}',
+              NULL,
+              NULL,
               'payroll distribution apply'
             );
           `);
@@ -742,6 +792,184 @@ export class SQLiteFinanceRepository implements FinanceRepository {
     });
   }
 
+  async createSavingsGoal(input: SavingsGoalDraft): Promise<SavingsGoal> {
+    await this.db.execAsync(`
+      INSERT INTO savings_goals (id, name, target_amount, current_amount, currency, target_date, account_id, category_id, updated_at)
+      VALUES (
+        '${input.id.replace(/'/g, "''")}',
+        '${input.name.replace(/'/g, "''")}',
+        ${input.targetAmount.amount},
+        0,
+        '${input.targetAmount.currency}',
+        ${input.targetDate ? `'${input.targetDate}'` : 'NULL'},
+        ${input.accountId ? `'${input.accountId.replace(/'/g, "''")}'` : 'NULL'},
+        ${input.categoryId ? `'${input.categoryId.replace(/'/g, "''")}'` : 'NULL'},
+        CURRENT_TIMESTAMP
+      );
+    `);
+    const saved = await this.getSavingsGoalById(input.id);
+    if (!saved) throw new Error('No se pudo crear la meta de ahorro.');
+    return saved;
+  }
+
+  async updateSavingsGoal(input: SavingsGoalDraft): Promise<SavingsGoal> {
+    await this.db.execAsync(`
+      UPDATE savings_goals
+      SET name = '${input.name.replace(/'/g, "''")}',
+          target_amount = ${input.targetAmount.amount},
+          target_date = ${input.targetDate ? `'${input.targetDate}'` : 'NULL'},
+          account_id = ${input.accountId ? `'${input.accountId.replace(/'/g, "''")}'` : 'NULL'},
+          category_id = ${input.categoryId ? `'${input.categoryId.replace(/'/g, "''")}'` : 'NULL'},
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = '${input.id.replace(/'/g, "''")}';
+    `);
+    const saved = await this.getSavingsGoalById(input.id);
+    if (!saved) throw new Error('Meta de ahorro no encontrada para actualizar.');
+    return saved;
+  }
+
+  async getSavingsGoalById(goalId: string): Promise<SavingsGoal | null> {
+    const row = await this.db.getFirstAsync<SavingsGoalRow>(
+      `SELECT id, name, target_amount, current_amount, currency, target_date, account_id, category_id FROM savings_goals WHERE id = ? LIMIT 1;`,
+      [goalId],
+    );
+    return row ? this.mapSavingsGoal(row) : null;
+  }
+
+  async listSavingsGoals(): Promise<SavingsGoal[]> {
+    const rows = await this.db.getAllAsync<SavingsGoalRow>(
+      `SELECT id, name, target_amount, current_amount, currency, target_date, account_id, category_id FROM savings_goals ORDER BY created_at DESC;`,
+    );
+    return rows.map((row) => this.mapSavingsGoal(row));
+  }
+
+  async createDebt(input: DebtDraft): Promise<Debt> {
+    await this.assertDebtAccountEligible(input.accountId);
+    await this.db.execAsync(`
+      INSERT INTO debts (id, account_id, principal_amount, current_balance, currency, interest_rate, min_payment, due_day, status, updated_at)
+      VALUES (
+        '${input.id.replace(/'/g, "''")}',
+        '${input.accountId.replace(/'/g, "''")}',
+        ${input.principalAmount.amount},
+        ${input.currentBalance.amount},
+        '${input.principalAmount.currency}',
+        ${input.interestRate ?? 'NULL'},
+        ${input.minPayment?.amount ?? 'NULL'},
+        ${input.dueDay ?? 'NULL'},
+        CASE WHEN ${input.currentBalance.amount} <= 0 THEN 'paid' ELSE 'active' END,
+        CURRENT_TIMESTAMP
+      );
+    `);
+    const saved = await this.getDebtById(input.id);
+    if (!saved) throw new Error('No se pudo crear la deuda.');
+    return saved;
+  }
+
+  async updateDebt(input: DebtDraft): Promise<Debt> {
+    await this.assertDebtAccountEligible(input.accountId);
+    await this.db.execAsync(`
+      UPDATE debts
+      SET account_id = '${input.accountId.replace(/'/g, "''")}',
+          principal_amount = ${input.principalAmount.amount},
+          current_balance = ${input.currentBalance.amount},
+          currency = '${input.principalAmount.currency}',
+          interest_rate = ${input.interestRate ?? 'NULL'},
+          min_payment = ${input.minPayment?.amount ?? 'NULL'},
+          due_day = ${input.dueDay ?? 'NULL'},
+          status = CASE WHEN ${input.currentBalance.amount} <= 0 THEN 'paid' ELSE 'active' END,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = '${input.id.replace(/'/g, "''")}';
+    `);
+    const saved = await this.getDebtById(input.id);
+    if (!saved) throw new Error('Deuda no encontrada para actualizar.');
+    return saved;
+  }
+
+  async getDebtById(debtId: string): Promise<Debt | null> {
+    const row = await this.db.getFirstAsync<DebtRow>(
+      `SELECT id, account_id, principal_amount, current_balance, currency, interest_rate, min_payment, due_day, status FROM debts WHERE id = ? LIMIT 1;`,
+      [debtId],
+    );
+    return row ? this.mapDebt(row) : null;
+  }
+
+  async listDebts(): Promise<Debt[]> {
+    const rows = await this.db.getAllAsync<DebtRow>(
+      `SELECT id, account_id, principal_amount, current_balance, currency, interest_rate, min_payment, due_day, status FROM debts ORDER BY created_at DESC;`,
+    );
+    return rows.map((row) => this.mapDebt(row));
+  }
+
+  async recordGoalContribution(input: OperationalMovementDraft): Promise<{ movement: OperationalMovementRecord; goal: SavingsGoal }> {
+    return this.db.withTransaction(async () => {
+      if (!input.goalId) throw new Error('Aporte inválido: goalId es requerido.');
+      const goal = await this.getSavingsGoalById(input.goalId);
+      if (!goal) throw new Error('Meta no encontrada para registrar aporte real.');
+
+      const movement = await this.createOperationalMovement(input);
+      await this.db.execAsync(`
+        UPDATE savings_goals
+        SET current_amount = current_amount + ${input.amount.amount}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = '${input.goalId.replace(/'/g, "''")}';
+      `);
+      const updatedGoal = await this.getSavingsGoalById(input.goalId);
+      if (!updatedGoal) throw new Error('Meta inconsistente tras registrar aporte real.');
+      return { movement, goal: updatedGoal };
+    });
+  }
+
+  async recordDebtPayment(input: OperationalMovementDraft): Promise<{ movement: OperationalMovementRecord; debt: Debt }> {
+    return this.db.withTransaction(async () => {
+      if (!input.debtId) throw new Error('Pago inválido: debtId es requerido.');
+      const debt = await this.getDebtById(input.debtId);
+      if (!debt) throw new Error('Deuda no encontrada para registrar pago real.');
+
+      const movement = await this.createOperationalMovement(input);
+      await this.db.execAsync(`
+        UPDATE debts
+        SET current_balance = MAX(current_balance - ${input.amount.amount}, 0),
+            status = CASE WHEN (current_balance - ${input.amount.amount}) <= 0 THEN 'paid' ELSE 'active' END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = '${input.debtId.replace(/'/g, "''")}';
+      `);
+      const updatedDebt = await this.getDebtById(input.debtId);
+      if (!updatedDebt) throw new Error('Deuda inconsistente tras registrar pago real.');
+      return { movement, debt: updatedDebt };
+    });
+  }
+
+  async getSavingsGoalSummary(goalId: string, asOfDate: string): Promise<SavingsGoalSummary> {
+    const goal = await this.getSavingsGoalById(goalId);
+    if (!goal) throw new Error('Meta no encontrada para resumen.');
+    const progress = calculateSavingsGoalProgress(goal.currentAmount.amount, goal.targetAmount.amount);
+    const pendingAmount = calculatePendingSavingsAmount(goal.currentAmount.amount, goal.targetAmount.amount);
+    const suggested = calculateSuggestedBiweeklyContribution({
+      currentAmount: goal.currentAmount.amount,
+      targetAmount: goal.targetAmount.amount,
+      targetDate: goal.targetDate,
+      asOfDate,
+    });
+    return {
+      goalId,
+      progress,
+      pendingAmount: { amount: pendingAmount, currency: goal.targetAmount.currency },
+      suggestedBiweeklyContribution: { amount: suggested, currency: goal.targetAmount.currency },
+    };
+  }
+
+  async getDebtSummary(debtId: string): Promise<DebtSummary> {
+    const debt = await this.getDebtById(debtId);
+    if (!debt) throw new Error('Deuda no encontrada para resumen.');
+    const progress = calculateDebtProgress(debt.currentBalance.amount, debt.principalAmount.amount);
+    const paidAmount = calculateDebtPaidAmount(debt.currentBalance.amount, debt.principalAmount.amount);
+    return {
+      debtId,
+      progress,
+      paidAmount: { amount: paidAmount, currency: debt.principalAmount.currency },
+      remainingBalance: debt.currentBalance,
+    };
+  }
+
   private mapQuincena(row: QuincenaRow): Quincena {
     return {
       id: row.id as QuincenaId,
@@ -764,6 +992,41 @@ export class SQLiteFinanceRepository implements FinanceRepository {
         currency: row.currency === DEFAULT_CURRENCY ? DEFAULT_CURRENCY : DEFAULT_CURRENCY,
       },
     };
+  }
+
+  private mapSavingsGoal(row: SavingsGoalRow): SavingsGoal {
+    return {
+      id: row.id,
+      name: row.name,
+      targetAmount: { amount: row.target_amount, currency: row.currency === DEFAULT_CURRENCY ? DEFAULT_CURRENCY : DEFAULT_CURRENCY },
+      currentAmount: { amount: row.current_amount, currency: row.currency === DEFAULT_CURRENCY ? DEFAULT_CURRENCY : DEFAULT_CURRENCY },
+      targetDate: row.target_date,
+      accountId: row.account_id,
+      categoryId: row.category_id,
+    };
+  }
+
+  private mapDebt(row: DebtRow): Debt {
+    return {
+      id: row.id,
+      accountId: row.account_id,
+      principalAmount: { amount: row.principal_amount, currency: row.currency === DEFAULT_CURRENCY ? DEFAULT_CURRENCY : DEFAULT_CURRENCY },
+      currentBalance: { amount: row.current_balance, currency: row.currency === DEFAULT_CURRENCY ? DEFAULT_CURRENCY : DEFAULT_CURRENCY },
+      interestRate: row.interest_rate,
+      minPayment: row.min_payment === null ? null : { amount: row.min_payment, currency: row.currency === DEFAULT_CURRENCY ? DEFAULT_CURRENCY : DEFAULT_CURRENCY },
+      dueDay: row.due_day,
+      status: row.status,
+    };
+  }
+
+  private async assertDebtAccountEligible(accountId: string): Promise<void> {
+    const account = await this.db.getFirstAsync<{ id: string; type: string }>(
+      `SELECT id, type FROM accounts WHERE id = ? LIMIT 1;`,
+      [accountId],
+    );
+    if (!account || account.type !== 'credit_card') {
+      throw new Error('Cuenta no elegible para deuda: debe ser credit_card.');
+    }
   }
 
   private mapFixedExpense(row: FixedExpenseRow) {

@@ -122,6 +122,8 @@ export interface OperationalMovementDraft {
   fromAccountId: string | null;
   toAccountId: string | null;
   categoryId: string | null;
+  goalId?: string | null;
+  debtId?: string | null;
   note?: string | null;
 }
 
@@ -134,7 +136,63 @@ export interface OperationalMovementRecord {
   fromAccountId: string | null;
   toAccountId: string | null;
   categoryId: string | null;
+  goalId?: string | null;
+  debtId?: string | null;
   note?: string | null;
+}
+
+export interface SavingsGoal {
+  id: string;
+  name: string;
+  targetAmount: Money;
+  targetDate: LocalDateISO | null;
+  currentAmount: Money;
+  accountId: string | null;
+  categoryId: string | null;
+}
+
+export interface SavingsGoalSummary {
+  goalId: string;
+  progress: number;
+  pendingAmount: Money;
+  suggestedBiweeklyContribution: Money;
+}
+
+export interface SavingsGoalDraft {
+  id: string;
+  name: string;
+  targetAmount: Money;
+  targetDate: LocalDateISO | null;
+  accountId: string | null;
+  categoryId: string | null;
+}
+
+export interface Debt {
+  id: string;
+  accountId: string;
+  principalAmount: Money;
+  currentBalance: Money;
+  interestRate: number | null;
+  minPayment: Money | null;
+  dueDay: number | null;
+  status: 'active' | 'paid';
+}
+
+export interface DebtDraft {
+  id: string;
+  accountId: string;
+  principalAmount: Money;
+  currentBalance: Money;
+  interestRate: number | null;
+  minPayment: Money | null;
+  dueDay: number | null;
+}
+
+export interface DebtSummary {
+  debtId: string;
+  progress: number;
+  paidAmount: Money;
+  remainingBalance: Money;
 }
 
 export interface AccountBalance {

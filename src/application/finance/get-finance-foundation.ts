@@ -8,11 +8,13 @@ export async function getFinanceFoundation(
 ) {
   const quincena = await ensureCurrentQuincena(repository, input?.date ?? new Date());
 
-  const [accounts, categories, movements, balances] = await Promise.all([
+  const [accounts, categories, movements, balances, goals, debts] = await Promise.all([
     repository.listAccounts(),
     repository.listCategories(),
     repository.listMovementsByQuincena(quincena.id),
     repository.getAccountBalances(),
+    repository.listSavingsGoals(),
+    repository.listDebts(),
   ]);
 
   return {
@@ -21,5 +23,7 @@ export async function getFinanceFoundation(
     categories,
     movements,
     balances,
+    goals,
+    debts,
   };
 }

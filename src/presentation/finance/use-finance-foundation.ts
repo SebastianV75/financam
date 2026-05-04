@@ -26,7 +26,7 @@ export function useFinanceFoundation(options: UseFinanceFoundationOptions = {}) 
   const { db } = useDatabaseContext();
   const [state, setState] = useState<ViewState>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [summary, setSummary] = useState({ accounts: 0, categories: 0, movements: 0, balances: 0 });
+  const [summary, setSummary] = useState({ accounts: 0, categories: 0, movements: 0, balances: 0, goals: 0, debts: 0 });
   const [accounts, setAccounts] = useState<Awaited<ReturnType<SQLiteFinanceRepository['listAccounts']>>>([]);
   const [categories, setCategories] = useState<Awaited<ReturnType<SQLiteFinanceRepository['listCategories']>>>([]);
   const [balances, setBalances] = useState<Awaited<ReturnType<SQLiteFinanceRepository['getAccountBalances']>>>([]);
@@ -63,6 +63,8 @@ export function useFinanceFoundation(options: UseFinanceFoundationOptions = {}) 
           categories: result.categories.length,
           movements: result.movements.length,
           balances: result.balances.length,
+          goals: result.goals.length,
+          debts: result.debts.length,
         });
         setAccounts(result.accounts);
         setCategories(result.categories);
@@ -130,6 +132,8 @@ export function useFinanceFoundation(options: UseFinanceFoundationOptions = {}) 
       categories: refreshed.categories.length,
       movements: refreshed.movements.length,
       balances: refreshed.balances.length,
+      goals: refreshed.goals.length,
+      debts: refreshed.debts.length,
     });
     setAccounts(refreshed.accounts);
     setCategories(refreshed.categories);

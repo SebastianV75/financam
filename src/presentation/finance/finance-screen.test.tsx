@@ -19,7 +19,7 @@ describe('FinanceScreen', () => {
     useFinanceFoundation.mockReturnValue({
       state: 'loading',
       error: null,
-      summary: { accounts: 0, categories: 0, movements: 0, balances: 0 },
+      summary: { accounts: 0, categories: 0, movements: 0, balances: 0, goals: 0, debts: 0 },
       accounts: [],
       categories: [],
       balances: [],
