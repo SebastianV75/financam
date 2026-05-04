@@ -6,6 +6,11 @@ import type {
   CreateCategoryInput,
   FinanceRepository,
   FinancialPlanRecord,
+  SaveFinancialPlanInput,
+  CreateFixedExpenseInput,
+  UpdateFixedExpenseInput,
+  FixedExpense,
+  FixedExpenseProjection,
   OperationalSnapshot,
   OperationalMovementDraft,
   OperationalMovementRecord,
@@ -32,8 +37,34 @@ interface FinancialPlanRow {
   id: string;
   quincena_id: string;
   category_id: string;
+  account_id: string | null;
+  is_fixed: number;
+  fixed_expense_id: string | null;
   planned_amount: number;
   currency: string | null;
+}
+
+interface FixedExpenseRow {
+  id: string;
+  name: string;
+  amount: number;
+  currency: string | null;
+  category_id: string;
+  account_id: string | null;
+  frequency: 'quincenal' | 'mensual';
+  is_active: number;
+}
+
+interface FixedExpenseProjectionRow {
+  id: string;
+  fixed_expense_id: string;
+  quincena_id: string;
+  category_id: string;
+  account_id: string | null;
+  amount: number;
+  currency: string | null;
+  status: 'pending' | 'linked';
+  financial_plan_id: string | null;
 }
 
 interface QuincenaRow {
@@ -255,22 +286,183 @@ export class SQLiteFinanceRepository implements FinanceRepository {
   }
 
   async listPlanByQuincena(quincenaId: QuincenaId): Promise<FinancialPlanRecord[]> {
+    return this.listFinancialPlansByQuincena(quincenaId);
+  }
+
+  async saveFinancialPlan(input: SaveFinancialPlanInput): Promise<FinancialPlanRecord> {
+    if (input.isFixed && !input.fixedExpenseId) {
+      throw new Error('Plan inválido: is_fixed requiere fixed_expense_id.');
+    }
+
+    await this.db.execAsync(`
+      INSERT INTO financial_plans (id, quincena_id, category_id, account_id, is_fixed, fixed_expense_id, planned_amount, currency)
+      VALUES (
+        '${input.id.replace(/'/g, "''")}',
+        '${input.quincenaId.replace(/'/g, "''")}',
+        '${input.categoryId.replace(/'/g, "''")}',
+        ${input.accountId ? `'${input.accountId.replace(/'/g, "''")}'` : 'NULL'},
+        ${input.isFixed ? 1 : 0},
+        ${input.fixedExpenseId ? `'${input.fixedExpenseId.replace(/'/g, "''")}'` : 'NULL'},
+        ${input.planned.amount},
+        '${input.planned.currency}'
+      )
+      ON CONFLICT(quincena_id, category_id) DO UPDATE SET
+        id = excluded.id,
+        account_id = excluded.account_id,
+        is_fixed = excluded.is_fixed,
+        fixed_expense_id = excluded.fixed_expense_id,
+        planned_amount = excluded.planned_amount,
+        currency = excluded.currency;
+    `);
+
+    const saved = await this.db.getFirstAsync<FinancialPlanRow>(
+      `SELECT id, quincena_id, category_id, account_id, is_fixed, fixed_expense_id, planned_amount, currency
+       FROM financial_plans
+       WHERE quincena_id = ? AND category_id = ?
+       LIMIT 1;`,
+      [input.quincenaId, input.categoryId],
+    );
+
+    if (!saved) throw new Error('No se pudo guardar el plan financiero.');
+    return this.mapFinancialPlan(saved);
+  }
+
+  async listFinancialPlansByQuincena(quincenaId: QuincenaId): Promise<FinancialPlanRecord[]> {
     const rows = await this.db.getAllAsync<FinancialPlanRow>(
-      `SELECT id, quincena_id, category_id, planned_amount, currency
+      `SELECT id, quincena_id, category_id, account_id, is_fixed, fixed_expense_id, planned_amount, currency
        FROM financial_plans
        WHERE quincena_id = ?
        ORDER BY id ASC;`,
       [quincenaId],
     );
 
+    return rows.map((row) => this.mapFinancialPlan(row));
+  }
+
+  async createFixedExpense(input: CreateFixedExpenseInput): Promise<FixedExpense> {
+    await this.db.execAsync(`
+      INSERT INTO fixed_expenses (id, name, amount, currency, category_id, account_id, frequency, is_active, updated_at)
+      VALUES (
+        '${input.id.replace(/'/g, "''")}',
+        '${input.name.replace(/'/g, "''")}',
+        ${input.amount.amount},
+        '${input.amount.currency}',
+        '${input.categoryId.replace(/'/g, "''")}',
+        ${input.accountId ? `'${input.accountId.replace(/'/g, "''")}'` : 'NULL'},
+        '${input.frequency}',
+        1,
+        CURRENT_TIMESTAMP
+      );
+    `);
+    const row = await this.db.getFirstAsync<FixedExpenseRow>(
+      `SELECT id, name, amount, currency, category_id, account_id, frequency, is_active FROM fixed_expenses WHERE id = ? LIMIT 1;`,
+      [input.id],
+    );
+    if (!row) throw new Error('No se pudo crear el gasto fijo.');
+    return this.mapFixedExpense(row);
+  }
+
+  async updateFixedExpense(input: UpdateFixedExpenseInput): Promise<FixedExpense> {
+    await this.db.execAsync(`
+      UPDATE fixed_expenses
+      SET name = '${input.name.replace(/'/g, "''")}',
+          amount = ${input.amount.amount},
+          currency = '${input.amount.currency}',
+          category_id = '${input.categoryId.replace(/'/g, "''")}',
+          account_id = ${input.accountId ? `'${input.accountId.replace(/'/g, "''")}'` : 'NULL'},
+          frequency = '${input.frequency}',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = '${input.id.replace(/'/g, "''")}';
+    `);
+    const row = await this.db.getFirstAsync<FixedExpenseRow>(
+      `SELECT id, name, amount, currency, category_id, account_id, frequency, is_active FROM fixed_expenses WHERE id = ? LIMIT 1;`,
+      [input.id],
+    );
+    if (!row) throw new Error('Gasto fijo no encontrado para actualizar.');
+    return this.mapFixedExpense(row);
+  }
+
+  async deactivateFixedExpense(id: string): Promise<void> {
+    await this.db.execAsync(
+      `UPDATE fixed_expenses SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = '${id.replace(/'/g, "''")}';`,
+    );
+  }
+
+  async listFixedExpenses(): Promise<FixedExpense[]> {
+    const rows = await this.db.getAllAsync<FixedExpenseRow>(
+      `SELECT id, name, amount, currency, category_id, account_id, frequency, is_active
+       FROM fixed_expenses
+       ORDER BY created_at DESC;`,
+    );
+    return rows.map((row) => this.mapFixedExpense(row));
+  }
+
+  async refreshFixedExpenseProjections(quincenaId: QuincenaId): Promise<void> {
+    const quincena = await this.getQuincenaById(quincenaId);
+    if (!quincena) throw new Error('Quincena no encontrada para proyección de gastos fijos.');
+
+    await this.db.withTransaction(async () => {
+      await this.db.execAsync(`DELETE FROM fixed_expense_projections WHERE quincena_id = '${quincenaId}' AND status = 'pending';`);
+
+      const expenses = await this.db.getAllAsync<FixedExpenseRow>(
+        `SELECT id, name, amount, currency, category_id, account_id, frequency, is_active
+         FROM fixed_expenses
+         WHERE is_active = 1
+         ORDER BY created_at ASC;`,
+      );
+
+      for (const expense of expenses) {
+        if (!this.isFrequencyApplicable(expense.frequency, quincena.startsAt)) continue;
+
+        const linkedPlan = await this.db.getFirstAsync<{ id: string | null }>(
+          `SELECT id FROM financial_plans WHERE quincena_id = ? AND fixed_expense_id = ? LIMIT 1;`,
+          [quincenaId, expense.id],
+        );
+
+        await this.db.execAsync(`
+          INSERT INTO fixed_expense_projections (id, fixed_expense_id, quincena_id, amount, currency, status, financial_plan_id, updated_at)
+          VALUES (
+            '${`fep-${quincenaId}-${expense.id}`.replace(/'/g, "''")}',
+            '${expense.id.replace(/'/g, "''")}',
+            '${quincenaId.replace(/'/g, "''")}',
+            ${expense.amount},
+            '${expense.currency ?? DEFAULT_CURRENCY}',
+            ${linkedPlan?.id ? "'linked'" : "'pending'"},
+            ${linkedPlan?.id ? `'${linkedPlan.id.replace(/'/g, "''")}'` : 'NULL'},
+            CURRENT_TIMESTAMP
+          )
+          ON CONFLICT(fixed_expense_id, quincena_id) DO UPDATE SET
+            amount = excluded.amount,
+            currency = excluded.currency,
+            status = CASE
+              WHEN fixed_expense_projections.financial_plan_id IS NOT NULL THEN 'linked'
+              ELSE excluded.status
+            END,
+            financial_plan_id = COALESCE(fixed_expense_projections.financial_plan_id, excluded.financial_plan_id),
+            updated_at = CURRENT_TIMESTAMP;
+        `);
+      }
+    });
+  }
+
+  async listFixedExpenseProjectionsByQuincena(quincenaId: QuincenaId): Promise<FixedExpenseProjection[]> {
+    const rows = await this.db.getAllAsync<FixedExpenseProjectionRow>(
+      `SELECT p.id, p.fixed_expense_id, p.quincena_id, f.category_id, f.account_id, p.amount, p.currency, p.status, p.financial_plan_id
+       FROM fixed_expense_projections p
+       INNER JOIN fixed_expenses f ON f.id = p.fixed_expense_id
+       WHERE p.quincena_id = ?
+       ORDER BY p.id ASC;`,
+      [quincenaId],
+    );
     return rows.map((row) => ({
       id: row.id,
+      fixedExpenseId: row.fixed_expense_id,
       quincenaId: row.quincena_id,
       categoryId: row.category_id,
-      planned: {
-        amount: row.planned_amount,
-        currency: row.currency === DEFAULT_CURRENCY ? DEFAULT_CURRENCY : DEFAULT_CURRENCY,
-      },
+      accountId: row.account_id,
+      amount: { amount: row.amount, currency: row.currency === DEFAULT_CURRENCY ? DEFAULT_CURRENCY : DEFAULT_CURRENCY },
+      status: row.status,
+      financialPlanId: row.financial_plan_id,
     }));
   }
 
@@ -557,6 +749,39 @@ export class SQLiteFinanceRepository implements FinanceRepository {
       endsAt: row.ends_at as Quincena['endsAt'],
       label: row.label,
     };
+  }
+
+  private mapFinancialPlan(row: FinancialPlanRow): FinancialPlanRecord {
+    return {
+      id: row.id,
+      quincenaId: row.quincena_id,
+      categoryId: row.category_id,
+      accountId: row.account_id,
+      isFixed: row.is_fixed === 1,
+      fixedExpenseId: row.fixed_expense_id,
+      planned: {
+        amount: row.planned_amount,
+        currency: row.currency === DEFAULT_CURRENCY ? DEFAULT_CURRENCY : DEFAULT_CURRENCY,
+      },
+    };
+  }
+
+  private mapFixedExpense(row: FixedExpenseRow) {
+    return {
+      id: row.id,
+      name: row.name,
+      amount: { amount: row.amount, currency: row.currency === DEFAULT_CURRENCY ? DEFAULT_CURRENCY : DEFAULT_CURRENCY },
+      categoryId: row.category_id,
+      accountId: row.account_id,
+      frequency: row.frequency,
+      isActive: row.is_active === 1,
+    };
+  }
+
+  private isFrequencyApplicable(frequency: 'quincenal' | 'mensual', quincenaStart: string): boolean {
+    if (frequency === 'quincenal') return true;
+    const day = Number(quincenaStart.split('-')[2]);
+    return day <= 15;
   }
 
   private async mapPayrollDistribution(row: PayrollDistributionRow): Promise<PayrollDistribution> {

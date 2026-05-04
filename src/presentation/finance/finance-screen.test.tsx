@@ -24,6 +24,8 @@ describe('FinanceScreen', () => {
       categories: [],
       balances: [],
       movements: [],
+      planningSummary: { plans: 0, projections: 0 },
+      payrollDistribution: null,
       activeQuincena: null,
       createQuickMovement: jest.fn(),
     });

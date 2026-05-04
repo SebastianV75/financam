@@ -4,7 +4,10 @@ import type {
   Category,
   CreateAccountInput,
   CreateCategoryInput,
+  CreateFixedExpenseInput,
   FinancialPlanRecord,
+  FixedExpense,
+  FixedExpenseProjection,
   ApplyPayrollDistributionInput,
   ApplyPayrollDistributionResult,
   OperationalSnapshot,
@@ -13,7 +16,9 @@ import type {
   OperationalMovementRecord,
   PayrollDistribution,
   QuincenaId,
+  SaveFinancialPlanInput,
   SavePayrollDistributionDraftInput,
+  UpdateFixedExpenseInput,
 } from './types';
 
 export interface FinanceRepository {
@@ -22,6 +27,14 @@ export interface FinanceRepository {
   listQuincenasByMonth(month: `${number}-${number}`): Promise<Quincena[]>;
   getOperationalSnapshotByQuincena(id: QuincenaId): Promise<OperationalSnapshot>;
   listPlanByQuincena(quincenaId: QuincenaId): Promise<FinancialPlanRecord[]>;
+  saveFinancialPlan(input: SaveFinancialPlanInput): Promise<FinancialPlanRecord>;
+  listFinancialPlansByQuincena(quincenaId: QuincenaId): Promise<FinancialPlanRecord[]>;
+  createFixedExpense(input: CreateFixedExpenseInput): Promise<FixedExpense>;
+  updateFixedExpense(input: UpdateFixedExpenseInput): Promise<FixedExpense>;
+  deactivateFixedExpense(id: string): Promise<void>;
+  listFixedExpenses(): Promise<FixedExpense[]>;
+  refreshFixedExpenseProjections(quincenaId: QuincenaId): Promise<void>;
+  listFixedExpenseProjectionsByQuincena(quincenaId: QuincenaId): Promise<FixedExpenseProjection[]>;
   listAccounts(): Promise<Account[]>;
   createAccount(input: CreateAccountInput): Promise<Account>;
   listCategories(): Promise<Category[]>;

@@ -9,8 +9,19 @@ interface FinanceScreenProps {
 }
 
 export function FinanceScreen({ mode, subtitle, title }: FinanceScreenProps) {
-  const { summary, accounts, categories, balances, movements, activeQuincena, createQuickMovement, error, state } =
-    useFinanceFoundation();
+  const {
+    summary,
+    accounts,
+    categories,
+    balances,
+    movements,
+    activeQuincena,
+    createQuickMovement,
+    planningSummary,
+    error,
+    state,
+  } =
+    useFinanceFoundation({ mode });
 
   return (
     <View className="flex-1 bg-background px-5 py-6">
@@ -31,6 +42,12 @@ export function FinanceScreen({ mode, subtitle, title }: FinanceScreenProps) {
         <Text className="mt-2 text-base text-text">Categorías: {summary.categories}</Text>
         <Text className="mt-2 text-base text-text">Movimientos: {summary.movements}</Text>
         <Text className="mt-2 text-base text-text">Saldos derivados: {summary.balances}</Text>
+        {mode === 'plan' ? (
+          <>
+            <Text className="mt-2 text-base text-text">Planes por quincena: {planningSummary.plans}</Text>
+            <Text className="mt-2 text-base text-text">Proyecciones fijas: {planningSummary.projections}</Text>
+          </>
+        ) : null}
         {error ? <Text className="mt-3 text-sm text-danger">{error}</Text> : null}
       </View>
 

@@ -15,7 +15,7 @@ describe('migrateDatabase', () => {
       0,
     );
 
-    expect(applied).toEqual([1, 2, 3, 4]);
+    expect(applied).toEqual([1, 2, 3, 4, 5]);
     expect(execAsync).toHaveBeenCalledWith(FOUNDATION_MIGRATIONS[0].sql);
     expect(execAsync).toHaveBeenCalledWith(FOUNDATION_MIGRATIONS[1].sql);
     expect(execAsync).toHaveBeenCalledWith(
@@ -25,7 +25,8 @@ describe('migrateDatabase', () => {
     expect(execAsync).toHaveBeenCalledWith('PRAGMA user_version = 2;');
     expect(execAsync).toHaveBeenCalledWith('PRAGMA user_version = 3;');
     expect(execAsync).toHaveBeenCalledWith('PRAGMA user_version = 4;');
-    expect(withTransaction).toHaveBeenCalledTimes(4);
+    expect(execAsync).toHaveBeenCalledWith('PRAGMA user_version = 5;');
+    expect(withTransaction).toHaveBeenCalledTimes(5);
   });
 
   it('define migración v2 con rebuild e índices', () => {
@@ -54,5 +55,15 @@ describe('migrateDatabase', () => {
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS payroll_distribution_applications');
     expect(sql).toContain('distribution_id TEXT NOT NULL UNIQUE');
     expect(sql).toContain('idx_payroll_distribution_entries_distribution');
+  });
+
+  it('define migración v5 para presupuesto y gastos fijos sin backfill destructivo', () => {
+    const sql = FOUNDATION_MIGRATIONS[4].sql;
+    expect(sql).toContain('ALTER TABLE financial_plans ADD COLUMN account_id');
+    expect(sql).toContain('ALTER TABLE financial_plans ADD COLUMN is_fixed');
+    expect(sql).toContain('idx_financial_plans_quincena_category');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS fixed_expenses');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS fixed_expense_projections');
+    expect(sql).toContain('idx_fixed_expense_projections_quincena');
   });
 });

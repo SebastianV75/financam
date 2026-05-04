@@ -1,2 +1,4 @@
 export const DATABASE_NAME = 'financam.db';
-export const DATABASE_VERSION = 4;
+// v5 mantiene compatibilidad hacia adelante con esquemas v4:
+// aplica ALTER/CREATE sin backfill destructivo.
+export const DATABASE_VERSION = 5;

@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { createOperationalMovement, getFinanceFoundation, getPayrollDistribution } from '@/application/finance';
+import {
+  createOperationalMovement,
+  getFinanceFoundation,
+  getPayrollDistribution,
+  getPlanningSnapshot,
+} from '@/application/finance';
 import { SQLiteFinanceRepository } from '@/infrastructure/repositories/sqlite-finance-repository';
 import { toDatabaseClient } from '@/infrastructure/db/client';
 import { useDatabaseContext } from '@/infrastructure/db/provider';
@@ -12,7 +17,12 @@ interface CreateMovementInput {
   amount: number;
 }
 
-export function useFinanceFoundation() {
+interface UseFinanceFoundationOptions {
+  mode?: 'plan' | 'movements';
+}
+
+export function useFinanceFoundation(options: UseFinanceFoundationOptions = {}) {
+  const mode = options.mode ?? 'movements';
   const { db } = useDatabaseContext();
   const [state, setState] = useState<ViewState>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +37,7 @@ export function useFinanceFoundation() {
     null,
   );
   const [payrollDistribution, setPayrollDistribution] = useState<Awaited<ReturnType<typeof getPayrollDistribution>>>(null);
+  const [planningSummary, setPlanningSummary] = useState({ plans: 0, projections: 0 });
 
   const repository = useMemo(() => {
     if (!db) return null;
@@ -61,6 +72,13 @@ export function useFinanceFoundation() {
         const distribution = await getPayrollDistribution(activeRepository, { quincenaId: result.quincena.id });
         if (!isMounted) return;
         setPayrollDistribution(distribution);
+        if (mode === 'plan') {
+          const planning = await getPlanningSnapshot(activeRepository, { date: new Date() });
+          if (!isMounted) return;
+          setPlanningSummary({ plans: planning.plans.length, projections: planning.projections.length });
+        } else {
+          setPlanningSummary({ plans: 0, projections: 0 });
+        }
         setError(null);
         setState('ready');
       } catch (loadError) {
@@ -76,7 +94,7 @@ export function useFinanceFoundation() {
     return () => {
       isMounted = false;
     };
-  }, [repository]);
+  }, [mode, repository]);
 
   async function createQuickMovement(input: CreateMovementInput) {
     if (!repository) throw new Error('Repositorio no inicializado.');
@@ -133,6 +151,7 @@ export function useFinanceFoundation() {
     balances,
     movements,
     payrollDistribution,
+    planningSummary,
     activeQuincena,
     createQuickMovement,
     error,

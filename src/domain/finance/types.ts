@@ -14,7 +14,63 @@ export interface FinancialPlanRecord {
   id: string;
   quincenaId: QuincenaId;
   categoryId: string;
+  accountId: string | null;
+  isFixed: boolean;
+  fixedExpenseId: string | null;
   planned: Money;
+}
+
+export interface SaveFinancialPlanInput {
+  id: string;
+  quincenaId: QuincenaId;
+  categoryId: string;
+  accountId: string | null;
+  isFixed: boolean;
+  fixedExpenseId: string | null;
+  planned: Money;
+}
+
+export type FixedExpenseFrequency = 'quincenal' | 'mensual';
+
+export interface FixedExpense {
+  id: string;
+  name: string;
+  amount: Money;
+  categoryId: string;
+  accountId: string | null;
+  frequency: FixedExpenseFrequency;
+  isActive: boolean;
+}
+
+export interface CreateFixedExpenseInput {
+  id: string;
+  name: string;
+  amount: Money;
+  categoryId: string;
+  accountId: string | null;
+  frequency: FixedExpenseFrequency;
+}
+
+export interface UpdateFixedExpenseInput {
+  id: string;
+  name: string;
+  amount: Money;
+  categoryId: string;
+  accountId: string | null;
+  frequency: FixedExpenseFrequency;
+}
+
+export type FixedExpenseProjectionStatus = 'pending' | 'linked';
+
+export interface FixedExpenseProjection {
+  id: string;
+  fixedExpenseId: string;
+  quincenaId: QuincenaId;
+  categoryId: string;
+  accountId: string | null;
+  amount: Money;
+  status: FixedExpenseProjectionStatus;
+  financialPlanId: string | null;
 }
 
 export interface QuincenaRange {

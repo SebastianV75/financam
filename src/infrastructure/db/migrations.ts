@@ -155,6 +155,53 @@ export const FOUNDATION_MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_payroll_distribution_applications_income
         ON payroll_distribution_applications(income_movement_id);
     `,
+    },
+  {
+    version: 5,
+    name: '0005_budget_and_fixed_expenses_core',
+    sql: `
+      ALTER TABLE financial_plans ADD COLUMN account_id TEXT;
+      ALTER TABLE financial_plans ADD COLUMN is_fixed INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE financial_plans ADD COLUMN fixed_expense_id TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_financial_plans_quincena_category
+        ON financial_plans(quincena_id, category_id);
+
+      CREATE TABLE IF NOT EXISTS fixed_expenses (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'MXN',
+        category_id TEXT NOT NULL,
+        account_id TEXT,
+        frequency TEXT NOT NULL CHECK(frequency IN ('quincenal', 'mensual')),
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (category_id) REFERENCES categories (id),
+        FOREIGN KEY (account_id) REFERENCES accounts (id)
+      );
+
+      CREATE TABLE IF NOT EXISTS fixed_expense_projections (
+        id TEXT PRIMARY KEY NOT NULL,
+        fixed_expense_id TEXT NOT NULL,
+        quincena_id TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'MXN',
+        status TEXT NOT NULL CHECK(status IN ('pending', 'linked')) DEFAULT 'pending',
+        financial_plan_id TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (fixed_expense_id) REFERENCES fixed_expenses (id) ON DELETE CASCADE,
+        FOREIGN KEY (quincena_id) REFERENCES quincenas (id),
+        FOREIGN KEY (financial_plan_id) REFERENCES financial_plans (id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_fixed_expenses_is_active ON fixed_expenses(is_active);
+      CREATE INDEX IF NOT EXISTS idx_fixed_expense_projections_quincena ON fixed_expense_projections(quincena_id);
+      CREATE INDEX IF NOT EXISTS idx_fixed_expense_projections_fixed_expense ON fixed_expense_projections(fixed_expense_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_fixed_expense_projections_unique
+        ON fixed_expense_projections(fixed_expense_id, quincena_id);
+    `,
   },
 ];
 

@@ -589,4 +589,180 @@ describe('SQLiteFinanceRepository', () => {
     expect(movements).toHaveLength(1);
     expect(movements[0].id).toBe('pd-1-e-1');
   });
+
+  it('hace upsert de financial_plan por quincena+categoría', async () => {
+    mockDb.getFirstAsync.mockResolvedValue({
+      id: 'fp-1',
+      quincena_id: 'q1',
+      category_id: 'cat-1',
+      account_id: null,
+      is_fixed: 0,
+      fixed_expense_id: null,
+      planned_amount: 800,
+      currency: 'MXN',
+    });
+
+    const saved = await repository.saveFinancialPlan({
+      id: 'fp-1',
+      quincenaId: 'q1',
+      categoryId: 'cat-1',
+      accountId: null,
+      isFixed: false,
+      fixedExpenseId: null,
+      planned: { amount: 800, currency: 'MXN' },
+    });
+
+    expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining('ON CONFLICT(quincena_id, category_id)'));
+    expect(saved.categoryId).toBe('cat-1');
+  });
+
+  it('retorna colección vacía para quincena sin planeación', async () => {
+    mockDb.getAllAsync.mockResolvedValue([]);
+
+    const plans = await repository.listFinancialPlansByQuincena('q-empty' as never);
+
+    expect(plans).toEqual([]);
+    expect(mockDb.getAllAsync).toHaveBeenCalledWith(expect.stringContaining('FROM financial_plans'), ['q-empty']);
+  });
+
+  it('rechaza plan fijo sin fixed_expense_id', async () => {
+    await expect(
+      repository.saveFinancialPlan({
+        id: 'fp-1',
+        quincenaId: 'q1',
+        categoryId: 'cat-1',
+        accountId: null,
+        isFixed: true,
+        fixedExpenseId: null,
+        planned: { amount: 800, currency: 'MXN' },
+      }),
+    ).rejects.toThrow('requiere fixed_expense_id');
+  });
+
+  it('refresh de proyecciones mensual aplica en primera quincena', async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({ id: 'q1', starts_at: '2026-05-01', ends_at: '2026-05-15', label: 'Q1' })
+      .mockResolvedValueOnce(null);
+    mockDb.getAllAsync.mockResolvedValue([
+      {
+        id: 'fe-1',
+        name: 'Renta',
+        amount: 5000,
+        currency: 'MXN',
+        category_id: 'cat-1',
+        account_id: null,
+        frequency: 'mensual',
+        is_active: 1,
+      },
+    ]);
+
+    await repository.refreshFixedExpenseProjections('q1' as never);
+    expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO fixed_expense_projections'));
+  });
+
+  it('crea gasto fijo activo en SQLite', async () => {
+    mockDb.getFirstAsync.mockResolvedValue({
+      id: 'fe-1',
+      name: 'Renta',
+      amount: 5000,
+      currency: 'MXN',
+      category_id: 'cat-1',
+      account_id: 'acc-1',
+      frequency: 'mensual',
+      is_active: 1,
+    });
+
+    const created = await repository.createFixedExpense({
+      id: 'fe-1',
+      name: 'Renta',
+      amount: { amount: 5000, currency: 'MXN' },
+      categoryId: 'cat-1',
+      accountId: 'acc-1',
+      frequency: 'mensual',
+    });
+
+    expect(created.isActive).toBe(true);
+    expect(mockDb.execAsync).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO fixed_expenses'));
+  });
+
+  it('desactiva gasto fijo sin borrar historial', async () => {
+    await repository.deactivateFixedExpense('fe-1');
+
+    expect(mockDb.execAsync).toHaveBeenCalledWith(
+      expect.stringContaining("UPDATE fixed_expenses SET is_active = 0"),
+    );
+    expect(mockDb.execAsync).not.toHaveBeenCalledWith(expect.stringContaining('DELETE FROM fixed_expenses'));
+  });
+
+  it('proyección expone categoryId y accountId según contrato', async () => {
+    mockDb.getAllAsync.mockResolvedValue([
+      {
+        id: 'fep-1',
+        fixed_expense_id: 'fe-1',
+        quincena_id: 'q1',
+        category_id: 'cat-1',
+        account_id: 'acc-1',
+        amount: 2500,
+        currency: 'MXN',
+        status: 'pending',
+        financial_plan_id: null,
+      },
+    ]);
+
+    const projections = await repository.listFixedExpenseProjectionsByQuincena('q1' as never);
+
+    expect(projections[0]).toMatchObject({
+      categoryId: 'cat-1',
+      accountId: 'acc-1',
+    });
+  });
+
+  it('refresh repetido preserva financial_plan_id enlazado (idempotencia)', async () => {
+    mockDb.getFirstAsync
+      .mockResolvedValueOnce({ id: 'q1', starts_at: '2026-05-01', ends_at: '2026-05-15', label: 'Q1' })
+      .mockResolvedValueOnce({ id: 'fp-1' })
+      .mockResolvedValueOnce({ id: 'q1', starts_at: '2026-05-01', ends_at: '2026-05-15', label: 'Q1' })
+      .mockResolvedValueOnce({ id: 'fp-1' });
+    mockDb.getAllAsync.mockResolvedValue([
+      {
+        id: 'fe-1',
+        name: 'Renta',
+        amount: 5000,
+        currency: 'MXN',
+        category_id: 'cat-1',
+        account_id: null,
+        frequency: 'quincenal',
+        is_active: 1,
+      },
+    ]);
+
+    await repository.refreshFixedExpenseProjections('q1' as never);
+    await repository.refreshFixedExpenseProjections('q1' as never);
+
+    const sqlCalls = mockDb.execAsync.mock.calls.map((call) => String(call[0]));
+    const projectionUpserts = sqlCalls.filter((sql) => sql.includes('INSERT INTO fixed_expense_projections'));
+    expect(projectionUpserts).toHaveLength(2);
+    expect(projectionUpserts.every((sql) => sql.includes("'fp-1'"))).toBe(true);
+    expect(projectionUpserts.every((sql) => sql.includes('COALESCE(fixed_expense_projections.financial_plan_id'))).toBe(true);
+  });
+
+  it('refresh de proyecciones mensual NO aplica en segunda quincena', async () => {
+    mockDb.getFirstAsync.mockResolvedValueOnce({ id: 'q2', starts_at: '2026-05-16', ends_at: '2026-05-31', label: 'Q2' });
+    mockDb.getAllAsync.mockResolvedValue([
+      {
+        id: 'fe-1',
+        name: 'Renta',
+        amount: 5000,
+        currency: 'MXN',
+        category_id: 'cat-1',
+        account_id: null,
+        frequency: 'mensual',
+        is_active: 1,
+      },
+    ]);
+
+    await repository.refreshFixedExpenseProjections('q2' as never);
+    const sqlCalls = mockDb.execAsync.mock.calls.map((c) => String(c[0]));
+    expect(sqlCalls.some((sql) => sql.includes('INSERT INTO fixed_expense_projections'))).toBe(false);
+  });
 });
