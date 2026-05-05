@@ -1042,4 +1042,93 @@ describe('SQLiteFinanceRepository', () => {
     const sqlCalls = mockDb.execAsync.mock.calls.map((c) => String(c[0]));
     expect(sqlCalls.some((sql) => sql.includes('UPDATE savings_goals'))).toBe(false);
   });
+
+  it('integra lectura de planes variables + fixed projections + gastos reales en misma quincena', async () => {
+    mockDb.getAllAsync.mockImplementation(async (query) => {
+      if (query.includes('FROM financial_plans')) {
+        return [
+          {
+            id: 'fp-var',
+            quincena_id: 'q1',
+            category_id: 'c1',
+            account_id: null,
+            is_fixed: 0,
+            fixed_expense_id: null,
+            planned_amount: 1500,
+            currency: 'MXN',
+          },
+          {
+            id: 'fp-fix',
+            quincena_id: 'q1',
+            category_id: 'c2',
+            account_id: null,
+            is_fixed: 1,
+            fixed_expense_id: 'fx1',
+            planned_amount: 800,
+            currency: 'MXN',
+          },
+        ];
+      }
+
+      if (query.includes('FROM fixed_expense_projections')) {
+        return [
+          {
+            id: 'fep1',
+            fixed_expense_id: 'fx1',
+            quincena_id: 'q1',
+            category_id: 'c2',
+            account_id: null,
+            amount: 800,
+            currency: 'MXN',
+            status: 'linked',
+            financial_plan_id: 'fp-fix',
+          },
+        ];
+      }
+
+      if (query.includes('FROM operational_movements')) {
+        return [
+          {
+            id: 'm-exp-1',
+            quincena_id: 'q1',
+            occurred_at: '2026-05-07',
+            kind: 'expense',
+            amount: 1200,
+            currency: 'MXN',
+            from_account_id: 'a1',
+            to_account_id: null,
+            category_id: 'c1',
+            goal_id: null,
+            debt_id: null,
+            note: null,
+          },
+        ];
+      }
+
+      return [];
+    });
+
+    const plans = await repository.listFinancialPlansByQuincena('q1' as never);
+    const projections = await repository.listFixedExpenseProjectionsByQuincena('q1' as never);
+    const movements = await repository.listMovementsByQuincena('q1' as never);
+
+    const plannedVariable = plans.filter((plan) => !plan.isFixed).reduce((sum, plan) => sum + plan.planned.amount, 0);
+    const committedFixed = projections.reduce((sum, projection) => sum + projection.amount.amount, 0);
+
+    expect(plannedVariable).toBe(1500);
+    expect(committedFixed).toBe(800);
+    expect(movements).toHaveLength(1);
+    expect(mockDb.getAllAsync).toHaveBeenCalledWith(expect.stringContaining('FROM operational_movements'), ['q1']);
+  });
+
+  it('sin nómina aplicada mantiene lectura estable y deuda en cero si no hay deudas', async () => {
+    mockDb.getFirstAsync.mockResolvedValue(null);
+    mockDb.getAllAsync.mockResolvedValue([]);
+
+    const distribution = await repository.getPayrollDistributionByQuincena('q1' as never);
+    const debts = await repository.listDebts();
+
+    expect(distribution).toBeNull();
+    expect(debts).toEqual([]);
+  });
 });

@@ -254,3 +254,47 @@ export interface OperationalSnapshot {
   quincena: Quincena;
   movements: OperationalMovementRecord[];
 }
+
+export type DashboardSummaryState = 'complete' | 'partial' | 'empty';
+export type DashboardMissingInput = 'income' | 'plans' | 'fixed-expenses';
+
+export interface DashboardGoalSummary {
+  goalId: string;
+  name: string;
+  progress: number;
+  pendingAmount: Money;
+  suggestedBiweeklyContribution: Money;
+}
+
+export interface DashboardDebtSummary {
+  debtId: string;
+  progress: number;
+  remainingBalance: Money;
+  paidAmount: Money;
+}
+
+export interface DashboardSummary {
+  quincena: Quincena;
+  state: DashboardSummaryState;
+  missing: DashboardMissingInput[];
+  real: {
+    liquidity: Money;
+    debtTotal: Money;
+    netWorth: Money;
+    actualExpense: Money;
+  };
+  planned: {
+    income: Money;
+    plannedVariable: Money;
+    committedFixed: Money;
+    reservedTotal: Money;
+  };
+  remaining: {
+    amount: Money;
+    reserveGap: Money;
+    unplannedOverflow: Money;
+    status: 'confirmed' | 'incomplete';
+  };
+  goals: DashboardGoalSummary[];
+  debts: DashboardDebtSummary[];
+}

@@ -28,3 +28,4 @@ export * from './list-debts';
 export * from './get-debt-summary';
 export * from './record-goal-contribution';
 export * from './record-debt-payment';
+export * from './get-dashboard-summary';
